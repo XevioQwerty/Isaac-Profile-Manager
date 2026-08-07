@@ -1,0 +1,9 @@
+# Generated per-machine at setup time - contains absolute local paths
+isaac-profiles.json
+
+# Generated launch scripts (created by Setup.bat for each profile)
+Play *.bat
+
+# Windows junk
+desktop.ini
+Thumbs.db
