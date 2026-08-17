@@ -13,6 +13,7 @@
     <!-- Junction creation needs no elevation, and asking for it would make a
          folder-linking tool look like malware to a modding audience. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
 
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -22,6 +23,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\IsaacProfileManager.Core\IsaacProfileManager.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Embedded as a resource as well as set on the exe, so the window and
+         taskbar show it and not the default WPF icon. -->
+    <Resource Include="app.ico" />
   </ItemGroup>
 
 </Project>

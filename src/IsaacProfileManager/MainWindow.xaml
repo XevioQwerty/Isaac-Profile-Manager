@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:IsaacProfileManager.Views"
         Title="Isaac Profile Manager" Height="680" Width="1040" MinHeight="520" MinWidth="880"
+        Icon="app.ico"
         Background="{StaticResource Bg}" WindowStartupLocation="CenterScreen">
 
     <Grid>
