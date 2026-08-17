@@ -1,0 +1,162 @@
+<UserControl x:Class="IsaacProfileManager.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,10">
+        <StackPanel MaxWidth="820" HorizontalAlignment="Left">
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Paths" Style="{StaticResource Heading}"/>
+
+                    <TextBlock Text="Config file" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding ConfigPath}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="Game directory" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding GameDir}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="Mods link" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding ModsDir}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="Profiles root" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding SyncRoot}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="Build root" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding BuildRoot}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="REPENTOGON launcher" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding LauncherExe}" Style="{StaticResource Mono}" Margin="0,0,0,14"/>
+
+                    <WrapPanel>
+                        <Button Content="Detect install" Command="{Binding DetectCommand}" Margin="0,0,8,8"/>
+                        <Button Content="Set isaac-ng.exe..." Command="{Binding BrowseIsaacExeCommand}" Margin="0,0,8,8"/>
+                        <Button Content="Set profiles root..." Command="{Binding BrowseSyncRootCommand}" Margin="0,0,8,8"/>
+                        <Button Content="Set launcher..." Command="{Binding BrowseLauncherCommand}" Margin="0,0,8,8"/>
+                    </WrapPanel>
+
+                    <TextBlock Text="{Binding DetectionResult}" Style="{StaticResource Mono}" Margin="0,4,0,0"
+                               Visibility="{Binding DetectionResult, Converter={StaticResource StringToVisible}}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Launch button" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                               Text="What the Launch Isaac button at the top right does."/>
+
+                    <RadioButton GroupName="LaunchMethod" IsChecked="{Binding LaunchViaSteam}"
+                                 Foreground="{StaticResource Text}" FontSize="13" Margin="0,0,0,2">
+                        <TextBlock Text="Through Steam"/>
+                    </RadioButton>
+                    <TextBlock Text="{Binding SteamUrlText}" Style="{StaticResource Mono}" Margin="22,0,0,4"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,12"
+                               Text="Steam applies whatever launch options you set there — including the REPENTOGONLauncher line, if you use it. This is also what Remote Play needs."/>
+
+                    <RadioButton GroupName="LaunchMethod" IsChecked="{Binding LaunchViaFile}"
+                                 Foreground="{StaticResource Text}" FontSize="13" Margin="0,0,0,2">
+                        <TextBlock Text="Run a program directly"/>
+                    </RadioButton>
+                    <TextBlock Text="{Binding LaunchTargetText}" Style="{StaticResource Mono}" Margin="22,0,0,6"/>
+                    <Button Content="Choose program..." Command="{Binding BrowseLaunchTargetCommand}"
+                            HorizontalAlignment="Left" Margin="22,0,0,6"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,12"
+                               Text="Normally REPENTOGONLauncher.exe, which is given the vanilla exe path and picks the build itself. Repentogon\isaac-ng.exe cannot be used — it refuses to start unless the launcher runs it."/>
+
+                    <TextBlock Text="Pressing Launch will run" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding LaunchPreviewText}" Style="{StaticResource Mono}"/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Build selection" Style="{StaticResource Heading}"/>
+
+                    <CheckBox Content="Choose REPENTOGON vs vanilla per profile" IsChecked="{Binding PerProfileBuild}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="22,6,0,10"
+                               Text="Activating a profile then writes [Shared] LaunchMode in repentogon_launcher.ini, which is how the launcher decides which build to start. For this to work through Steam, your launch options must start the launcher rather than the game — see the README."/>
+
+                    <Border Background="#1A2419" BorderBrush="{StaticResource Good}" BorderThickness="1"
+                            CornerRadius="4" Padding="10" Margin="0,0,0,12"
+                            Visibility="{Binding LaunchOptionsCorrect, Converter={StaticResource BoolToVisible}}">
+                        <TextBlock Text="{Binding LaunchOptionsText}"/>
+                    </Border>
+
+                    <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="10" Margin="0,0,0,12"
+                            Visibility="{Binding LaunchOptionsCorrect, Converter={StaticResource BoolToCollapsed}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding LaunchOptionsText}" Margin="0,0,0,8"/>
+                            <TextBlock Text="Currently set to" Style="{StaticResource Dim}"/>
+                            <TextBlock Text="{Binding LaunchOptionsCurrent}" Style="{StaticResource Mono}" Margin="0,0,0,6"/>
+                            <TextBlock Text="Should be" Style="{StaticResource Dim}"/>
+                            <TextBlock Text="{Binding LaunchOptionsSuggested}" Style="{StaticResource Mono}" Margin="0,0,0,8"/>
+                            <Button Content="Copy the correct line" Command="{Binding CopyLaunchOptionsCommand}"
+                                    HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="Launcher ini" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding LauncherIniPath}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                               Text="The launcher owns this file and rewrites it when it exits, so anything written here is a request for the next launch, not a durable setting."/>
+
+                    <WrapPanel>
+                        <Button Content="Open launcher ini" Command="{Binding OpenLauncherIniCommand}" Margin="0,0,8,0"/>
+                        <Button Content="Start REPENTOGON launcher" Command="{Binding StartLauncherCommand}"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Backups" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                               Text="This tool backs up before anything destructive. Some of those are copies; others are the original, moved here instead of being deleted — those are never pruned automatically, because they may be the only instance left."/>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button Content="Scan backups" Command="{Binding ScanBackupsCommand}" Margin="0,0,8,0"/>
+                        <Button Content="Prune old copies" Command="{Binding PruneBackupsCommand}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="{Binding BackupSummary}" Style="{StaticResource Mono}"
+                               Visibility="{Binding BackupSummary, Converter={StaticResource StringToVisible}}"/>
+                    <TextBlock Text="{Binding PrunePlanText}" Style="{StaticResource Dim}" Margin="0,4,0,8"
+                               Visibility="{Binding PrunePlanText, Converter={StaticResource StringToVisible}}"/>
+
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Backups}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,1">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="70"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding Name}" Style="{StaticResource Mono}"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SizeMb, StringFormat={}{0:N1} MB}"
+                                                   Style="{StaticResource Mono}" TextAlignment="Right"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding KindText}" Style="{StaticResource Dim}" Margin="10,0,0,0"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="About this config" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}"
+                               Text="This app reads and writes the same isaac-profiles.json as IsaacProfiles.ps1, so the script's command line and shortcuts keep working alongside it. Setup happens in the app on first run; the script is optional."/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,8,0,0"
+                               Text="Online play needs identical profile contents on every machine — the same files, not just the same folder names — and the same game build. Compare the 'Game Version:' line in each player's log.txt before a session."/>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

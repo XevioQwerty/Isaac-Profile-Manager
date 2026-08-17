@@ -1,0 +1,179 @@
+<UserControl x:Class="IsaacProfileManager.Views.DebugView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Margin="0,14,0,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- No log -->
+        <Border Grid.Row="0" Grid.RowSpan="3" Style="{StaticResource Card}" VerticalAlignment="Top"
+                Visibility="{Binding Exists, Converter={StaticResource BoolToCollapsed}}">
+            <StackPanel>
+                <TextBlock Text="No log yet" Style="{StaticResource Heading}"/>
+                <TextBlock Style="{StaticResource Dim}"
+                           Text="Isaac writes log.txt when it starts, and truncates it on each launch. Run the game once and come back."/>
+                <TextBlock Text="{Binding LogPath}" Style="{StaticResource Mono}" Margin="0,8,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Summary of the last run -->
+        <Border Grid.Row="0" Style="{StaticResource Card}"
+                Visibility="{Binding Exists, Converter={StaticResource BoolToVisible}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Last run" Style="{StaticResource Heading}"/>
+
+                    <UniformGrid Columns="3" Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="Game version" Style="{StaticResource Dim}"/>
+                            <TextBlock Text="{Binding GameVersionText}" FontSize="17" FontWeight="SemiBold"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Command line" Style="{StaticResource Dim}"/>
+                            <TextBlock Text="{Binding CommandLineText}" Style="{StaticResource Mono}" Margin="0,4,0,0"/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Text="Written" Style="{StaticResource Dim}"/>
+                            <TextBlock Text="{Binding WrittenText}" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </UniformGrid>
+
+                    <TextBlock Text="{Binding CountsText}" Style="{StaticResource Mono}"/>
+                    <TextBlock Text="{Binding ModComparison}" Margin="0,6,0,0"
+                               Foreground="{StaticResource WarnBrush}"
+                               Visibility="{Binding ModComparison, Converter={StaticResource StringToVisible}}"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Top">
+                    <Button Content="Reload" Command="{Binding ReloadCommand}" Margin="0,0,0,6"/>
+                    <Button Content="Open log" Command="{Binding OpenLogCommand}" Margin="0,0,0,6"/>
+                    <Button Content="Open folder" Command="{Binding OpenFolderCommand}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Filters, and the desync table when the log has one -->
+        <Border Grid.Row="1" Style="{StaticResource Card}"
+                Visibility="{Binding Exists, Converter={StaticResource BoolToVisible}}">
+            <StackPanel>
+                <StackPanel Margin="0,0,0,12" Visibility="{Binding HasChecksums, Converter={StaticResource BoolToVisible}}">
+                    <TextBlock Text="Desync checksums" Style="{StaticResource Heading}"/>
+                    <ItemsControl ItemsSource="{Binding Checksums}" Margin="0,0,0,6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="130"/>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Player}" Style="{StaticResource Mono}" FontWeight="Bold"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Checksum}" Style="{StaticResource Mono}"/>
+                                    <TextBlock Grid.Column="2" Text="{Binding GlobalRng}" Style="{StaticResource Mono}"/>
+                                    <Border Grid.Column="3" Background="{StaticResource Accent}" CornerRadius="3" Padding="5,0"
+                                            Visibility="{Binding IsOdd, Converter={StaticResource BoolToVisible}}">
+                                        <TextBlock Text="ODD ONE OUT" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="{Binding ChecksumVerdict}" Foreground="{StaticResource WarnBrush}"/>
+                </StackPanel>
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0" Margin="0,0,10,0"
+                             Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"/>
+                    <CheckBox Grid.Column="1" Content="Info" IsChecked="{Binding ShowInfo}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <CheckBox Grid.Column="2" Content="Asserts" IsChecked="{Binding ShowAsserts}" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <CheckBox Grid.Column="3" Content="Errors" IsChecked="{Binding ShowErrors}" VerticalAlignment="Center"/>
+                </Grid>
+
+                <WrapPanel>
+                    <Button Content="Errors only" Command="{Binding ShowErrorsOnlyCommand}" Margin="0,0,8,0"/>
+                    <Button Content="Mods loaded" Command="{Binding ShowModsCommand}" Margin="0,0,8,0"/>
+                    <Button Content="Lua Debug" Command="{Binding ShowLuaDebugCommand}" Margin="0,0,8,0"/>
+                    <Button Content="Checksums" Command="{Binding ShowChecksumsCommand}" Margin="0,0,8,0"/>
+                    <Button Content="Clear filters" Command="{Binding ClearFiltersCommand}" Margin="0,0,8,0"/>
+                    <Button Content="Copy what's shown" Command="{Binding CopyVisibleCommand}"/>
+                </WrapPanel>
+
+                <TextBlock Text="{Binding CategoryFilterText}" Style="{StaticResource Dim}" Margin="0,8,0,0"
+                           Visibility="{Binding CategoryFilterText, Converter={StaticResource StringToVisible}}"/>
+
+                <!-- Earlier runs, kept because the game truncates the log each launch -->
+                <Separator Margin="0,10,0,8" Background="{StaticResource Border}"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*" MaxWidth="360"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0" Text="Previous sessions" Style="{StaticResource Dim}"
+                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                    <ComboBox Grid.Column="1" ItemsSource="{Binding Archives}" SelectedItem="{Binding SelectedArchive}"
+                              Margin="0,0,10,0">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Label}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Content="View" Command="{Binding ViewArchiveCommand}" Margin="0,0,6,0"/>
+                        <Button Content="Back to current" Command="{Binding ViewCurrentCommand}" Margin="0,0,6,0"/>
+                        <Button Content="Archive now" Command="{Binding ArchiveNowCommand}"/>
+                    </StackPanel>
+
+                    <TextBlock Grid.Column="3" Text="{Binding SourceText}" Style="{StaticResource Dim}"
+                               VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Lines -->
+        <ListBox Grid.Row="2" ItemsSource="{Binding View}" Margin="0,0,0,0"
+                 Visibility="{Binding Exists, Converter={StaticResource BoolToVisible}}"
+                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                 ScrollViewer.HorizontalScrollBarVisibility="Auto">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="54"/>
+                            <ColumnDefinition Width="34"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Text="{Binding Number}" Style="{StaticResource Mono}"
+                                   TextAlignment="Right" Margin="0,0,10,0"/>
+                        <TextBlock Grid.Column="1" Text="{Binding SeverityText}" FontFamily="Consolas" FontSize="11"
+                                   FontWeight="Bold" VerticalAlignment="Center"
+                                   Foreground="{StaticResource Accent}"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Text}" FontFamily="Consolas" FontSize="12"
+                                   TextWrapping="NoWrap" Foreground="{StaticResource Text}"/>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
+</UserControl>

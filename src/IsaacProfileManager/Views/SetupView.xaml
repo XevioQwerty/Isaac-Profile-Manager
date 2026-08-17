@@ -1,0 +1,100 @@
+<UserControl x:Class="IsaacProfileManager.Views.SetupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="820" HorizontalAlignment="Left" Margin="16">
+
+            <TextBlock Text="Set up Isaac Profile Manager" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,14"
+                       Text="One pass and you are done. Your existing mods are copied into your first profile and the original folder is renamed, never deleted."/>
+
+            <!-- 1. The game -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="1 · Find the game" Style="{StaticResource Heading}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <Button Content="Detect automatically" Style="{StaticResource PrimaryButton}"
+                                Command="{Binding DetectCommand}" Margin="0,0,8,0"/>
+                        <Button Content="Choose isaac-ng.exe..." Command="{Binding BrowseExeCommand}"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding DetectionNote}" Style="{StaticResource Dim}"
+                               Visibility="{Binding DetectionNote, Converter={StaticResource StringToVisible}}"/>
+                    <TextBlock Text="{Binding IsaacExe}" Style="{StaticResource Mono}" Margin="0,4,0,0"
+                               Visibility="{Binding IsaacExe, Converter={StaticResource StringToVisible}}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 2. Where profiles live -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="2 · Where your profiles live" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
+                               Text="One folder holds every profile and your mod library. This is what you sync or share. It must be outside the game directory."/>
+                    <Grid Margin="0,0,0,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding SyncRoot, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseSyncRootCommand}"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 3. First profile -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="3 · Your first profile" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
+                               Text="Name it after what it is for — coop-with-alex, heavy-modded, no-mods. You can add more at any time."/>
+                    <TextBox Text="{Binding FirstProfile, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10"/>
+
+                    <CheckBox Content="Copy the mods I have installed now into this profile"
+                              IsChecked="{Binding CopyExistingMods}" Margin="0,0,0,6"/>
+                    <TextBlock Text="{Binding ExistingModsNote}" Style="{StaticResource Dim}" Margin="22,0,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 4. Launching -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="4 · How you launch (optional)" Style="{StaticResource Heading}"/>
+
+                    <CheckBox Content="I launch Isaac through Steam" IsChecked="{Binding OwnsOnSteam}" Margin="0,0,0,10"/>
+
+                    <TextBlock Text="REPENTOGON launcher, if you use it" Style="{StaticResource Dim}"/>
+                    <Grid Margin="0,2,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding LauncherExe, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseLauncherCommand}"/>
+                    </Grid>
+
+                    <CheckBox Content="Choose REPENTOGON vs vanilla per profile" IsChecked="{Binding PerProfileBuild}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="22,4,0,0"
+                               Text="Activating a profile then sets which build the launcher starts. Needs your Steam launch options to run the launcher — the Settings tab checks this for you afterwards."/>
+                </StackPanel>
+            </Border>
+
+            <!-- Go -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                            CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                            Visibility="{Binding HasProblems, Converter={StaticResource BoolToVisible}}">
+                        <TextBlock Text="{Binding ProblemsText}"/>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Set everything up" Style="{StaticResource PrimaryButton}"
+                                Command="{Binding RunCommand}" Margin="0,0,12,0" Padding="20,9"/>
+                        <TextBlock Text="{Binding Progress}" Style="{StaticResource Mono}" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

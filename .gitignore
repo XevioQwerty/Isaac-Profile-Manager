@@ -1,9 +1,19 @@
 # Generated per-machine at setup time - contains absolute local paths
 isaac-profiles.json
 
-# Generated launch scripts (created by Setup.bat for each profile)
-Play *.bat
+# Generated per-profile switch scripts
+Switch to *.bat
 
 # Windows junk
 desktop.ini
 Thumbs.db
+
+# .NET build output
+bin/
+obj/
+*.user
+.vs/
+
+# Update watcher (contains your Discord webhook URL)
+update-watcher.json
+update-watcher-state.json

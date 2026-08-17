@@ -1,0 +1,180 @@
+<UserControl x:Class="IsaacProfileManager.Views.LibraryView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Margin="0,14,0,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header: what the library holds, and which profile is being built -->
+        <Border Grid.Row="0" Style="{StaticResource Card}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Mod library" Style="{StaticResource Heading}"/>
+                    <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding LibraryPathText}" Style="{StaticResource Mono}" Margin="0,4,0,0"/>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="Building profile" Style="{StaticResource Dim}" Margin="0,0,0,4"/>
+                    <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding TargetProfile}" MinWidth="200"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Browser -->
+        <Grid Grid.Row="1" Visibility="{Binding HasLibrary, Converter={StaticResource BoolToVisible}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.15*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0" Margin="0,0,14,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Grid.Column="0" Margin="0,0,8,0"
+                             Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"/>
+                    <CheckBox Grid.Column="1" Content="Only ticked" IsChecked="{Binding ShowOnlyIncluded}"
+                              VerticalAlignment="Center"/>
+                </Grid>
+
+                <ListBox Grid.Row="1" ItemsSource="{Binding View}" SelectedItem="{Binding Selected}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <CheckBox Grid.Column="0" IsChecked="{Binding InProfile}"
+                                          VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                                <Border Grid.Column="1" Width="60" Height="60" Margin="0,0,12,0"
+                                        Background="#121216" CornerRadius="4">
+                                    <Image Stretch="UniformToFill"
+                                           Source="{Binding PreviewPath, Converter={StaticResource PathToImage}}"/>
+                                </Border>
+
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                                    <TextBlock Text="{Binding SubtitleText}" Style="{StaticResource Mono}"
+                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Visibility="{Binding SubtitleText, Converter={StaticResource StringToVisible}}"/>
+                                    <TextBlock Text="{Binding UsedByText}" Style="{StaticResource Dim}"
+                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,2,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+
+            <!-- Detail -->
+            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,0,12">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisible}}">
+                        <Border Background="#121216" CornerRadius="4" Padding="0" Margin="0,0,0,12"
+                                HorizontalAlignment="Left">
+                            <Image MaxHeight="200" MaxWidth="340" Stretch="Uniform"
+                                   Source="{Binding Selected.PreviewPath, Converter={StaticResource PathToImage}}"/>
+                        </Border>
+
+                        <TextBlock Text="{Binding Selected.Name}" FontSize="18" FontWeight="SemiBold"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,10">
+                            <TextBlock Text="{Binding Selected.OriginText}" Style="{StaticResource Dim}"/>
+                            <TextBlock Text="{Binding DetailSizeText}" Style="{StaticResource Dim}" Margin="12,0,0,0"/>
+                        </StackPanel>
+
+                        <TextBlock Text="Library folder" Style="{StaticResource Dim}"/>
+                        <TextBlock Text="{Binding Selected.Path}" Style="{StaticResource Mono}" Margin="0,0,0,8"/>
+
+                        <TextBlock Text="Used by" Style="{StaticResource Dim}"/>
+                        <TextBlock Text="{Binding Selected.UsedByText}" Margin="0,0,0,12"/>
+
+                        <TextBlock Text="{Binding Selected.Description}" Style="{StaticResource Dim}" Margin="0,0,0,12"/>
+
+                        <WrapPanel>
+                            <Button Content="Open folder" Command="{Binding OpenFolderCommand}" Margin="0,0,8,8"/>
+                            <Button Content="Remove from library" Command="{Binding RemoveCommand}" Margin="0,0,8,8"/>
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Dim}"
+                                   Text="Removing is only offered for a mod no profile uses, and moves it to .backup rather than deleting it."/>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- Empty library -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" VerticalAlignment="Top"
+                Visibility="{Binding HasLibrary, Converter={StaticResource BoolToCollapsed}}">
+            <StackPanel>
+                <TextBlock Text="Nothing here yet" Style="{StaticResource Heading}"/>
+                <TextBlock Style="{StaticResource Dim}"
+                           Text="Two ways to fill the library: import subscribed mods on the Workshop tab, or open a profile on the Mod profiles tab and convert its existing folders into library links."/>
+            </StackPanel>
+        </Border>
+
+        <!-- Actions -->
+        <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0"
+                Visibility="{Binding HasLibrary, Converter={StaticResource BoolToVisible}}">
+            <StackPanel>
+                <TextBlock Text="{Binding TargetProfileText}" Style="{StaticResource Dim}" Margin="0,0,0,10"/>
+                <WrapPanel>
+                    <Button Content="Apply to profile" Style="{StaticResource PrimaryButton}"
+                            Command="{Binding ApplyCommand}" Margin="0,0,12,8"/>
+                    <Button Content="Tick all shown" Command="{Binding IncludeAllCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Untick all shown" Command="{Binding IncludeNoneCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Open library folder" Command="{Binding OpenLibraryCommand}" Margin="0,0,12,8"/>
+                    <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,0,8"/>
+                </WrapPanel>
+
+                <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
+
+                <TextBlock Text="Proving two people match" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
+                <WrapPanel>
+                    <Button Content="Record hashes" Command="{Binding RecordHashesCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Verify library" Command="{Binding VerifyCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Export this profile..." Command="{Binding ExportProfileCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Compare with an export..." Command="{Binding CompareCommand}" Margin="0,0,8,8"/>
+                    <TextBlock Text="{Binding HashProgress}" Style="{StaticResource Mono}" VerticalAlignment="Center" Margin="0,0,0,8"/>
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
+                           Text="Same folder name with different files is a desync cause a folder listing cannot see. Hashing makes it one value to compare; the export is a small file to send someone."/>
+
+                <StackPanel Visibility="{Binding HasReport, Converter={StaticResource BoolToVisible}}">
+                    <TextBlock Text="{Binding ReportTitle}" FontWeight="SemiBold" Margin="0,4,0,6"/>
+                    <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Report}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Style="{StaticResource Mono}"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

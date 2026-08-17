@@ -1,0 +1,82 @@
+<UserControl x:Class="IsaacProfileManager.Views.BuildVariantsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,10">
+        <StackPanel MaxWidth="820" HorizontalAlignment="Left">
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="{Binding StateHeadline}" FontSize="19" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding StateDetail}" Style="{StaticResource Dim}" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Switching -->
+            <Border Style="{StaticResource Card}" Visibility="{Binding IsSwitchable, Converter={StaticResource BoolToVisible}}">
+                <StackPanel>
+                    <TextBlock Text="Switch build folder" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                               Text="Each folder in the build root is a complete build. Switching re-points the junction at a different one — nothing is copied, and neither folder is modified."/>
+
+                    <ListBox ItemsSource="{Binding Variants}" SelectedItem="{Binding SelectedVariant}"
+                             MaxHeight="180" Margin="0,0,0,12">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding}" FontWeight="SemiBold"/>
+                                    <Border Background="{StaticResource Good}" CornerRadius="3" Padding="5,1" Margin="10,0,0,0"
+                                            VerticalAlignment="Center">
+                                        <Border.Visibility>
+                                            <MultiBinding Converter="{StaticResource EqualsToVisible}">
+                                                <Binding/>
+                                                <Binding RelativeSource="{RelativeSource AncestorType=ListBox}"
+                                                         Path="DataContext.Status.ActiveVariant"/>
+                                            </MultiBinding>
+                                        </Border.Visibility>
+                                        <TextBlock Text="IN USE" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <Button Content="Switch to the selected build" Style="{StaticResource PrimaryButton}"
+                            Command="{Binding SwitchCommand}" HorizontalAlignment="Left"/>
+
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,12,0,0"
+                               Text="Isaac must be closed. Repentogon\isaac-ng.exe refuses to be started directly, so launch through REPENTOGONLauncher.exe (or Steam, if your launch options point at it) for the change to take effect."/>
+                </StackPanel>
+            </Border>
+
+            <!-- First-time setup -->
+            <Border Style="{StaticResource Card}" Visibility="{Binding CanInitialize, Converter={StaticResource BoolToVisible}}">
+                <StackPanel>
+                    <TextBlock Text="First-time setup" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                               Text="Moves the installed build into the build root as 'Vanilla', copies it to a second folder named 'OnlineFix', and links the game's Repentogon\ folder back at 'Vanilla'. Both start out identical to what you already have installed; what you put in the second one afterwards is up to you."/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                               Text="Nothing is deleted at any point — the existing folder is moved, not copied and removed."/>
+
+                    <Button Content="Set up build switching" Command="{Binding InitializeCommand}" HorizontalAlignment="Left"/>
+
+                    <TextBlock Text="{Binding ProgressText}" Style="{StaticResource Mono}" Margin="0,10,0,0"
+                               Visibility="{Binding ProgressText, Converter={StaticResource StringToVisible}}"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Paths -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Paths" Style="{StaticResource Heading}"/>
+                    <TextBlock Text="Build link" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding LinkPathText}" Style="{StaticResource Mono}" Margin="0,0,0,8"/>
+                    <TextBlock Text="Build root" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding BuildRootText}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+                    <Button Content="Open build root" Command="{Binding OpenBuildRootCommand}" HorizontalAlignment="Left"/>
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

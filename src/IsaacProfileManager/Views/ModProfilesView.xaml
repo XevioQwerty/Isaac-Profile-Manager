@@ -1,0 +1,255 @@
+<UserControl x:Class="IsaacProfileManager.Views.ModProfilesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Margin="0,14,0,10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="340"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Profile list -->
+        <Grid Grid.Column="0" Margin="0,0,14,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <ListBox Grid.Row="0" ItemsSource="{Binding Profiles}" SelectedItem="{Binding Selected}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="NoWrap"/>
+                                    <Border Background="{StaticResource Good}" CornerRadius="3" Padding="5,1" Margin="8,0,0,0"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IsActive, Converter={StaticResource BoolToVisible}}">
+                                        <TextBlock Text="ACTIVE" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                    <TextBlock Text="{Binding ModCountText}" Style="{StaticResource Dim}"/>
+                                    <TextBlock Text="{Binding DisabledText}" FontSize="12" Margin="8,0,0,0"
+                                               Foreground="{StaticResource WarnBrush}"
+                                               Visibility="{Binding DisabledText, Converter={StaticResource StringToVisible}}"/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <TextBlock Grid.Column="1" Text="{Binding BuildText}" Style="{StaticResource Dim}"
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Profiles that arrived from elsewhere -->
+            <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,12,0,0"
+                    Background="#1A2419" BorderBrush="{StaticResource Good}"
+                    Visibility="{Binding HasDiscovered, Converter={StaticResource BoolToVisible}}">
+                <StackPanel>
+                    <TextBlock Text="Profiles found on disk" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
+                               Text="Manifests you have but have not added yet — usually synced from someone you play with."/>
+                    <ItemsControl ItemsSource="{Binding Discovered}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Notes}" Style="{StaticResource Dim}"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="Add"
+                                            Command="{Binding RelativeSource={RelativeSource AncestorType=ItemsControl},
+                                                              Path=DataContext.AddDiscoveredCommand}"
+                                            CommandParameter="{Binding}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- New profile -->
+            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,0">
+                <StackPanel>
+                    <TextBlock Text="New profile" Style="{StaticResource Heading}"/>
+                    <TextBox Text="{Binding NewProfileName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8"/>
+                    <TextBlock Text="Start from" Style="{StaticResource Dim}" Margin="0,0,0,4"/>
+                    <ComboBox ItemsSource="{Binding SeedOptions}" SelectedItem="{Binding SeedFrom}" Margin="0,0,0,10"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Create profile" Command="{Binding AddCommand}" Margin="0,0,8,0"/>
+                        <Button Content="Import..." Command="{Binding ImportProfileCommand}"/>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Dim}" Margin="0,8,0,0"
+                               Text="Import takes a profile file someone sent you and builds it from your library."/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Detail -->
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+
+                <Border Style="{StaticResource Card}"
+                        Visibility="{Binding HasSelection, Converter={StaticResource BoolToCollapsed}}">
+                    <TextBlock Text="No profile selected. Create one on the left, or import mods on the Workshop tab and build a profile from the Library."
+                               Style="{StaticResource Dim}"/>
+                </Border>
+
+                <StackPanel Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisible}}">
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Selected.Name}" FontSize="19" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding SelectedPathText}" Style="{StaticResource Mono}" Margin="0,4,0,10"/>
+
+                            <UniformGrid Columns="4" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="Mods" Style="{StaticResource Dim}"/>
+                                    <TextBlock Text="{Binding Selected.ModCount}" FontSize="20" FontWeight="SemiBold"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Disabled" Style="{StaticResource Dim}"/>
+                                    <TextBlock Text="{Binding Selected.DisabledCount}" FontSize="20" FontWeight="SemiBold"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Build" Style="{StaticResource Dim}"/>
+                                    <TextBlock Text="{Binding Selected.BuildText}" FontSize="15" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="Folder changed" Style="{StaticResource Dim}"/>
+                                    <TextBlock Text="{Binding Selected.LastModifiedText}" FontSize="13" Margin="0,6,0,0"/>
+                                </StackPanel>
+                            </UniformGrid>
+
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Activate this profile" Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding ActivateCommand}" Margin="0,0,8,0"/>
+                                <Button Content="Activate &amp; launch" Command="{Binding ActivateAndLaunchCommand}" Margin="0,0,8,0"/>
+                                <Button Content="Open folder" Command="{Binding OpenFolderCommand}" Margin="0,0,8,0"/>
+                                <Button Content="Open profiles root" Command="{Binding OpenSyncRootCommand}" Margin="0,0,8,0"/>
+                                <Button Content="Remove from list" Command="{Binding RemoveCommand}"/>
+                            </StackPanel>
+
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,10,0,0"
+                                       Text="Activating re-points mods\ at this folder and deletes any disable.it markers inside it, so nothing is present but silently switched off. Nothing is copied and the folder itself is never modified otherwise."/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="Details" Style="{StaticResource Heading}"/>
+                            <TextBlock Text="What is this profile for, and who do you play it with?" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
+                            <TextBox Text="{Binding NotesDraft, UpdateSourceTrigger=PropertyChanged}"
+                                     AcceptsReturn="True" TextWrapping="Wrap" Height="90"
+                                     VerticalScrollBarVisibility="Auto" Margin="0,0,0,10"/>
+
+                            <CheckBox Content="Run this profile on the REPENTOGON build"
+                                      IsChecked="{Binding UseRepentogonDraft}"
+                                      IsEnabled="{Binding PerProfileBuild}" Margin="0,0,0,4"/>
+                            <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,10"
+                                       Text="Only applies when per-profile build selection is on (Settings). REPENTOGON is pinned to v1.9.7.12.J273 and retail is newer — everyone in an online session must be on the same one."/>
+
+                            <Button Content="Save details" Command="{Binding SaveDetailsCommand}" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Contents, driven by the shared library -->
+                    <Border Style="{StaticResource Card}" DataContext="{Binding Contents}">
+                        <StackPanel>
+                            <TextBlock Text="Mods in this profile" Style="{StaticResource Heading}"/>
+
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                                       Visibility="{Binding HasLibrary, Converter={StaticResource BoolToCollapsed}}"
+                                       Text="No library yet. Import your mods on the Workshop tab first — then a profile is just a selection from it."/>
+
+                            <StackPanel Visibility="{Binding HasLibrary, Converter={StaticResource BoolToVisible}}">
+                                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
+                                           Text="Ticked mods are linked into the profile from the shared library. Nothing is copied, so a mod costs disk once no matter how many profiles use it."/>
+
+                                <!-- Migration prompt for profiles that predate the library -->
+                                <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                                        Visibility="{Binding HasRealFolders, Converter={StaticResource BoolToVisible}}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding StatusText}" Margin="0,0,0,6"/>
+                                        <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
+                                            <ItemsControl ItemsSource="{Binding RealFolders}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding}" Style="{StaticResource Mono}"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                        <Button Content="Convert them to library links"
+                                                Command="{Binding AdoptCommand}" HorizontalAlignment="Left"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="0,0,8,0"/>
+                                    <Button Grid.Column="1" Content="All" Command="{Binding IncludeAllCommand}" Margin="0,0,6,0"/>
+                                    <Button Grid.Column="2" Content="None" Command="{Binding IncludeNoneCommand}"/>
+                                </Grid>
+
+                                <ListBox ItemsSource="{Binding View}" MaxHeight="300" Margin="0,0,0,10">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <CheckBox Grid.Column="0" IsChecked="{Binding Included}"
+                                                          VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                                                <Image Grid.Column="1" Width="44" Height="44" Margin="0,0,10,0"
+                                                       Stretch="UniformToFill"
+                                                       Source="{Binding PreviewPath, Converter={StaticResource PathToImage}}"/>
+
+                                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding SubtitleText}" Style="{StaticResource Mono}"
+                                                               Visibility="{Binding SubtitleText, Converter={StaticResource StringToVisible}}"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Apply to profile" Style="{StaticResource PrimaryButton}"
+                                            Command="{Binding ApplyCommand}" Margin="0,0,12,0"/>
+                                    <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

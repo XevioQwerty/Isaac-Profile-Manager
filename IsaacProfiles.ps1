@@ -1,48 +1,55 @@
 <#
 .SYNOPSIS
-    Isaac Mod Profile Manager - switch between mod sets using a directory junction.
+    Switch between named Binding of Isaac mod profiles.
 
 .DESCRIPTION
-    Keeps multiple Isaac mod sets in one synced folder and points the game's
-    mods\ directory at whichever one you want via a junction. Nothing is copied
-    at launch, so switching is instant and the synced folder is the only truth.
+    Each profile is a folder of mods. Switching re-points the game's mods\
+    directory at that folder using a directory junction, so it is instant and
+    nothing is copied.
 
-    Run with -Setup for the first-time wizard. After that the generated
-    "Play Online.bat" / "Play Singleplayer.bat" do the switching.
+    This tool does NOT launch the game. Switch a profile, then start Isaac
+    however you normally do (Steam, the REPENTOGON launcher, a shortcut).
 
 .PARAMETER Setup
-    Run the first-time setup wizard.
+    First-time setup wizard.
 
-.PARAMETER ProfileName
-    Which profile to activate (any folder name under the sync root).
+.PARAMETER Use
+    Name of the profile to activate.
 
-.PARAMETER NoLaunch
-    Switch the profile but do not start the game.
+.PARAMETER List
+    Show all profiles and which one is active.
+
+.PARAMETER Add
+    Create a new empty profile with this name.
+
+.PARAMETER Remove
+    Remove a profile from the config (the folder is left on disk).
 
 .EXAMPLE
     .\IsaacProfiles.ps1 -Setup
-    .\IsaacProfiles.ps1 -ProfileName online
+    .\IsaacProfiles.ps1 -Use vanilla-coop
+    .\IsaacProfiles.ps1 -Add challenge-run
+    .\IsaacProfiles.ps1 -List
 #>
 
 [CmdletBinding()]
 param(
     [switch]$Setup,
-    [string]$ProfileName,
-    [switch]$NoLaunch
+    [string]$Use,
+    [switch]$List,
+    [string]$Add,
+    [string]$Remove
 )
 
 $ErrorActionPreference = 'Stop'
 
-# ---------------------------------------------------------------------------
-# EDIT ME before sharing: your repo, shown to users who skip Syncthing.
-# ---------------------------------------------------------------------------
-$Script:RepoUrl = 'https://github.com/XevioQwerty/IsaacSync'
-
+# EDIT ME before sharing: shown to people who skip Syncthing.
+$Script:RepoUrl    = 'https://github.com/XevioQwerty/Isaac-Profile-Manager'
 $Script:ConfigPath = Join-Path $PSScriptRoot 'isaac-profiles.json'
-$Script:DefaultProfiles = @('online', 'singleplayer')
+$Script:SteamAppId = 250900
 
 # ---------------------------------------------------------------------------
-# Output helpers
+# Output
 # ---------------------------------------------------------------------------
 
 function Write-Head { param($t) Write-Host ''; Write-Host "  $t" -ForegroundColor Cyan; Write-Host ("  " + ('-' * $t.Length)) -ForegroundColor DarkGray }
@@ -73,87 +80,8 @@ function Read-YesNo {
 }
 
 # ---------------------------------------------------------------------------
-# Junction handling
-#
-# These are the dangerous operations. A junction looks like a real folder to
-# most tools, and Remove-Item -Recurse on one has historically followed the
-# link and deleted the TARGET's contents. Everything below deletes links only,
-# via the .NET call that cannot recurse.
+# Pickers
 # ---------------------------------------------------------------------------
-
-function Test-IsJunction {
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { return $false }
-    $item = Get-Item -LiteralPath $Path -Force
-    return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
-}
-
-function Get-JunctionTarget {
-    param([string]$Path)
-    if (-not (Test-IsJunction $Path)) { return $null }
-    $item = Get-Item -LiteralPath $Path -Force
-    if ($item.PSObject.Properties.Name -contains 'Target' -and $item.Target) {
-        return @($item.Target)[0]
-    }
-    return $null   # older PowerShell doesn't expose .Target; display-only, so fine
-}
-
-function Remove-JunctionLink {
-    param([string]$Path)
-    if (-not (Test-IsJunction $Path)) {
-        throw "Refusing to delete '$Path' - it is not a junction. Move it aside manually."
-    }
-    # recursive:$false - removes the link, never touches the target
-    [System.IO.Directory]::Delete($Path, $false)
-}
-
-function New-ProfileJunction {
-    param([string]$LinkPath, [string]$TargetPath)
-    if (-not (Test-Path -LiteralPath $TargetPath)) {
-        throw "Junction target does not exist: $TargetPath"
-    }
-    New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -Force | Out-Null
-}
-
-# ---------------------------------------------------------------------------
-# Discovery
-# ---------------------------------------------------------------------------
-
-function Get-DocumentsPath {
-    # Do not use $env:USERPROFILE\Documents - OneDrive redirection breaks it.
-    return [Environment]::GetFolderPath('MyDocuments')
-}
-
-function Get-LauncherIniPath {
-    return Join-Path (Get-DocumentsPath) 'My Games\repentogon_launcher.ini'
-}
-
-function Find-IsaacExe {
-    # 1. REPENTOGON launcher already knows the path - best source.
-    $ini = Get-LauncherIniPath
-    if (Test-Path -LiteralPath $ini) {
-        $match = Select-String -LiteralPath $ini -Pattern '^\s*IsaacExecutable\s*=\s*(.+?)\s*$' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($match) {
-            $candidate = $match.Matches[0].Groups[1].Value.Trim()
-            if (Test-Path -LiteralPath $candidate) {
-                Write-Info "Found game path in repentogon_launcher.ini"
-                return $candidate
-            }
-        }
-    }
-
-    # 2. Common install locations.
-    $guesses = @()
-    foreach ($drive in (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -ne $null })) {
-        $guesses += Join-Path $drive.Root 'Program Files (x86)\Steam\steamapps\common\The Binding of Isaac Rebirth\isaac-ng.exe'
-        $guesses += Join-Path $drive.Root 'Steam\steamapps\common\The Binding of Isaac Rebirth\isaac-ng.exe'
-        $guesses += Join-Path $drive.Root 'SteamLibrary\steamapps\common\The Binding of Isaac Rebirth\isaac-ng.exe'
-    }
-    foreach ($g in $guesses) {
-        if (Test-Path -LiteralPath $g) { Write-Info "Found game at a standard Steam path"; return $g }
-    }
-    return $null
-}
 
 function Test-GuiAvailable {
     if ($null -ne $Script:GuiOk) { return $Script:GuiOk }
@@ -194,20 +122,92 @@ function Select-FilePath {
     return $typed.Trim().Trim('"')
 }
 
+# ---------------------------------------------------------------------------
+# Junctions
+#
+# A junction looks like a real folder to most tools, and a recursive delete
+# aimed at one can follow the link and wipe the TARGET. Everything here deletes
+# links only, via the .NET call that cannot recurse.
+# ---------------------------------------------------------------------------
+
+function Test-IsJunction {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $false }
+    $item = Get-Item -LiteralPath $Path -Force
+    return [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+}
+
+function Get-JunctionTarget {
+    param([string]$Path)
+    if (-not (Test-IsJunction $Path)) { return $null }
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($item.PSObject.Properties.Name -contains 'Target' -and $item.Target) {
+        return @($item.Target)[0]
+    }
+    return $null
+}
+
+function Remove-JunctionLink {
+    param([string]$Path)
+    if (-not (Test-IsJunction $Path)) {
+        throw "Refusing to delete '$Path' - it is not a junction. Move it aside manually."
+    }
+    [System.IO.Directory]::Delete($Path, $false)   # false = never recurse
+}
+
+function New-ProfileJunction {
+    param([string]$LinkPath, [string]$TargetPath)
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
+        throw "Profile folder does not exist: $TargetPath"
+    }
+    New-Item -ItemType Junction -Path $LinkPath -Target $TargetPath -Force | Out-Null
+}
+
+# ---------------------------------------------------------------------------
+# Discovery
+# ---------------------------------------------------------------------------
+
+function Get-DocumentsPath {
+    # Not $env:USERPROFILE\Documents - OneDrive redirection breaks that.
+    return [Environment]::GetFolderPath('MyDocuments')
+}
+
+function Get-LauncherIniPath {
+    return Join-Path (Get-DocumentsPath) 'My Games\repentogon_launcher.ini'
+}
+
+function Find-IsaacExe {
+    $ini = Get-LauncherIniPath
+    if (Test-Path -LiteralPath $ini) {
+        $match = Select-String -LiteralPath $ini -Pattern '^\s*IsaacExecutable\s*=\s*(.+?)\s*$' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($match) {
+            $candidate = $match.Matches[0].Groups[1].Value.Trim()
+            if (Test-Path -LiteralPath $candidate) {
+                Write-Info 'Found game path in repentogon_launcher.ini'
+                return $candidate
+            }
+        }
+    }
+    foreach ($drive in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+        foreach ($sub in @('Program Files (x86)\Steam','Steam','SteamLibrary')) {
+            $g = Join-Path $drive.Root "$sub\steamapps\common\The Binding of Isaac Rebirth\isaac-ng.exe"
+            if (Test-Path -LiteralPath $g) { Write-Info 'Found game at a standard Steam path'; return $g }
+        }
+    }
+    return $null
+}
+
 function Find-RepentogonLauncher {
     # The launcher must NOT live inside the game install - the official docs
     # warn against extracting it there, and specifically against a folder named
-    # "repentogon" in the game dir since that name is used by the downgraded
-    # build. So look beside the install and in common standalone locations,
-    # then fall back to asking.
+    # "repentogon" in the game dir (that name belongs to the downgraded build).
     param([string]$GameDir)
     $parent = Split-Path $GameDir -Parent
-    $roots = @($parent) + @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue |
-                            ForEach-Object { $_.Root })
+    $roots = @($parent) + @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { $_.Root })
     foreach ($root in ($roots | Select-Object -Unique)) {
-        foreach ($name in @('REPENTOGONLauncher', 'Repentogon', 'RepentogonLauncher')) {
-            $candidate = Join-Path $root "$name\REPENTOGONLauncher.exe"
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        foreach ($name in @('REPENTOGONLauncher','Repentogon','RepentogonLauncher')) {
+            $c = Join-Path $root "$name\REPENTOGONLauncher.exe"
+            if (Test-Path -LiteralPath $c -PathType Leaf) { return $c }
         }
     }
     try {
@@ -219,8 +219,8 @@ function Find-RepentogonLauncher {
 }
 
 function Resolve-LauncherPath {
-    # Accept either the exe itself or the folder containing it.
-    # NOTE: parameter is not named $Input - that is a PowerShell automatic variable.
+    # Accept the exe itself or a folder containing it.
+    # NOTE: not named $Input - that is a PowerShell automatic variable.
     param([string]$PathText)
     if ([string]::IsNullOrWhiteSpace($PathText)) { return $null }
     $p = $PathText.Trim().Trim('"')
@@ -229,59 +229,27 @@ function Resolve-LauncherPath {
         return $null
     }
     if (Test-Path -LiteralPath $p -PathType Container) {
-        $candidate = Join-Path $p 'REPENTOGONLauncher.exe'
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        $c = Join-Path $p 'REPENTOGONLauncher.exe'
+        if (Test-Path -LiteralPath $c -PathType Leaf) { return $c }
     }
     return $null
 }
 
-function Remove-DisableMarkers {
-    param([string]$ProfileDir)
-    $markers = @(Get-ChildItem -LiteralPath $ProfileDir -Recurse -Filter 'disable.it' -Force -ErrorAction SilentlyContinue)
-    if ($markers.Count -gt 0) {
-        $markers | Remove-Item -Force -ErrorAction SilentlyContinue
-        Write-Info "Cleared $($markers.Count) disable.it marker(s) - folder contents are the mod list"
-    }
-}
-
-function New-Shortcut {
-    param([string]$TargetPath, [string]$ShortcutPath, [string]$IconPath, [string]$WorkDir)
-    try {
-        $shell = New-Object -ComObject WScript.Shell
-        $lnk = $shell.CreateShortcut($ShortcutPath)
-        $lnk.TargetPath       = $TargetPath
-        $lnk.WorkingDirectory = $WorkDir
-        $lnk.Description      = 'Isaac Mod Profile Manager'
-        if ($IconPath -and (Test-Path -LiteralPath $IconPath)) { $lnk.IconLocation = "$IconPath,0" }
-        $lnk.Save()
-        return $true
-    } catch {
-        Write-Warn "Could not create shortcut: $($_.Exception.Message)"
-        return $false
-    }
-}
-
-function Select-IsaacExe {
-    return (Select-FilePath 'Select isaac-ng.exe' `
-                            'Isaac executable (isaac-ng.exe)|isaac-ng.exe|All executables (*.exe)|*.exe' `
-                            $null)
-}
-
 function Get-SyncthingInfo {
-    # Read-only. Surfaces the API key and GUI address so manual setup is copy-paste.
-    $cfg = Join-Path $env:LOCALAPPDATA 'Syncthing\config.xml'
-    if (-not (Test-Path -LiteralPath $cfg)) {
-        $cfg = Join-Path $env:APPDATA 'Syncthing\config.xml'
-    }
-    if (-not (Test-Path -LiteralPath $cfg)) { return $null }
-    try {
-        [xml]$xml = Get-Content -LiteralPath $cfg -Raw
-        return [pscustomobject]@{
-            ConfigPath = $cfg
-            ApiKey     = $xml.configuration.gui.apikey
-            Address    = $xml.configuration.gui.address
+    foreach ($base in @($env:LOCALAPPDATA, $env:APPDATA)) {
+        $cfg = Join-Path $base 'Syncthing\config.xml'
+        if (Test-Path -LiteralPath $cfg) {
+            try {
+                [xml]$xml = Get-Content -LiteralPath $cfg -Raw
+                return [pscustomobject]@{
+                    ConfigPath = $cfg
+                    ApiKey     = $xml.configuration.gui.apikey
+                    Address    = $xml.configuration.gui.address
+                }
+            } catch { }
         }
-    } catch { return $null }
+    }
+    return $null
 }
 
 # ---------------------------------------------------------------------------
@@ -296,21 +264,32 @@ function Get-Config {
 
 function Save-Config {
     param($Config)
-    $Config | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $Script:ConfigPath -Encoding UTF8
+    $Config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Script:ConfigPath -Encoding UTF8
+}
+
+function Test-ProfileName {
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    # Becomes a folder name and part of a .bat filename.
+    return ($Name -notmatch '[\\/:*?"<>|]')
 }
 
 # ---------------------------------------------------------------------------
-# Launcher mode
+# REPENTOGON build selection
 #
-# repentogon_launcher.ini has [Shared] LaunchMode. Which number means what is
-# NOT documented anywhere - it was inferred from one install. So setup records
-# the value observed in each mode rather than assuming, and this is opt-in.
+# The launcher reads [Shared] LaunchMode from its ini to decide which build to
+# start. 1 = REPENTOGON, 0 = vanilla (the game then gets --repentogonoff).
+# Writing it here means the build follows the profile even though we never
+# launch anything ourselves.
 # ---------------------------------------------------------------------------
 
 function Set-LauncherMode {
     param([int]$Mode)
     $ini = Get-LauncherIniPath
-    if (-not (Test-Path -LiteralPath $ini)) { Write-Info 'No launcher ini found - skipping mode switch.'; return }
+    if (-not (Test-Path -LiteralPath $ini)) {
+        Write-Info 'No launcher ini found - skipping build selection.'
+        return $false
+    }
     $lines = Get-Content -LiteralPath $ini
     $out = @(); $inShared = $false; $written = $false
     foreach ($line in $lines) {
@@ -324,51 +303,91 @@ function Set-LauncherMode {
             $out += $line
         }
     }
-    if ($inShared -and -not $written) { $out += "LaunchMode = $Mode" }
+    if ($inShared -and -not $written) { $out += "LaunchMode = $Mode"; $written = $true }
+    if (-not $written) { $out += '[Shared]'; $out += "LaunchMode = $Mode" }
     Set-Content -LiteralPath $ini -Value $out -Encoding UTF8
-    Write-Ok "Launcher mode set to $Mode"
+    return $true
+}
+
+function Remove-DisableMarkers {
+    param([string]$ProfileDir)
+    $markers = @(Get-ChildItem -LiteralPath $ProfileDir -Recurse -Filter 'disable.it' -Force -ErrorAction SilentlyContinue)
+    if ($markers.Count -gt 0) {
+        $markers | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Info "Cleared $($markers.Count) disable.it marker(s)"
+    }
+    return $markers.Count
 }
 
 # ---------------------------------------------------------------------------
-# Generated launch scripts
+# Generated switch scripts and shortcuts
 # ---------------------------------------------------------------------------
 
-function Write-PlayScripts {
-    param($Config)
-    foreach ($name in $Config.Profiles) {
-        $title = (Get-Culture).TextInfo.ToTitleCase($name)
-        $file  = Join-Path $PSScriptRoot "Play $title.bat"
-        $body  = @"
+function Write-SwitchScript {
+    param([string]$Name)
+    $file = Join-Path $PSScriptRoot "Switch to $Name.bat"
+    $body = @"
 @echo off
 REM Generated by IsaacProfiles.ps1 - safe to delete and regenerate.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0IsaacProfiles.ps1" -ProfileName "$name"
-if errorlevel 1 pause
+REM Switches the active mod profile. Does NOT launch the game.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0IsaacProfiles.ps1" -Use "$Name"
+timeout /t 4 >nul
 "@
-        Set-Content -LiteralPath $file -Value $body -Encoding ASCII
-        Write-Ok "Wrote '$(Split-Path $file -Leaf)'"
+    Set-Content -LiteralPath $file -Value $body -Encoding ASCII
+    return $file
+}
+
+function New-Shortcut {
+    param([string]$TargetPath, [string]$ShortcutPath, [string]$IconPath, [string]$WorkDir)
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk = $shell.CreateShortcut($ShortcutPath)
+        $lnk.TargetPath       = $TargetPath
+        $lnk.WorkingDirectory = $WorkDir
+        $lnk.Description      = 'Switch Isaac mod profile'
+        if ($IconPath -and (Test-Path -LiteralPath $IconPath)) { $lnk.IconLocation = "$IconPath,0" }
+        $lnk.Save()
+        return $true
+    } catch {
+        Write-Warn "Could not create shortcut: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Publish-Profile {
+    # Regenerate the .bat and any shortcuts for one profile.
+    param($Config, [string]$Name)
+    $bat = Write-SwitchScript $Name
+    Write-Ok "Wrote '$(Split-Path $bat -Leaf)'"
+    foreach ($dir in @($Config.ShortcutDirs)) {
+        if (-not $dir) { continue }
+        $lnk = Join-Path $dir "Isaac profile - $Name.lnk"
+        if (New-Shortcut -TargetPath $bat -ShortcutPath $lnk -IconPath $Config.IsaacExe -WorkDir $PSScriptRoot) {
+            Write-Ok "Shortcut: $lnk"
+        }
     }
 }
 
 # ---------------------------------------------------------------------------
-# Setup wizard
+# Setup
 # ---------------------------------------------------------------------------
 
 function Invoke-Setup {
     Write-Host ''
-    Write-Host '  ===============================================' -ForegroundColor Cyan
-    Write-Host '   Isaac Mod Profile Manager - first-time setup' -ForegroundColor Cyan
-    Write-Host '  ===============================================' -ForegroundColor Cyan
+    Write-Host '  =========================================' -ForegroundColor Cyan
+    Write-Host '   Isaac Profile Manager - first-time setup' -ForegroundColor Cyan
+    Write-Host '  =========================================' -ForegroundColor Cyan
+    Write-Info 'This switches mod profiles. It does not launch the game.'
 
-    # --- Step 1: locate the game ------------------------------------------
-    Write-Head 'Step 1 of 5: Locate the game'
+    # --- Game --------------------------------------------------------------
+    Write-Head 'Step 1 of 6: Locate the game'
     $exe = Find-IsaacExe
     if ($exe) {
         Write-Host "  Detected: $exe" -ForegroundColor White
         if (-not (Read-YesNo 'Use this installation?')) { $exe = $null }
     }
     if (-not $exe) {
-        Write-Info 'Pick your isaac-ng.exe...'
-        $exe = Select-IsaacExe
+        $exe = Select-FilePath 'Select isaac-ng.exe' 'Isaac executable (isaac-ng.exe)|isaac-ng.exe|All executables (*.exe)|*.exe' $null
     }
     if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { Write-Err 'No valid executable selected. Aborting.'; return }
 
@@ -376,51 +395,53 @@ function Invoke-Setup {
     $modsDir = Join-Path $gameDir 'mods'
     Write-Ok "Game directory: $gameDir"
 
-    # --- Step 2: sync root -------------------------------------------------
-    Write-Head 'Step 2 of 5: Choose the synced folder'
-    Write-Info 'This folder holds every mod set and is what Syncthing/git will track.'
+    # --- Sync root ---------------------------------------------------------
+    Write-Head 'Step 2 of 6: Choose where profiles live'
+    Write-Info 'One folder holds every profile. This is what you sync or version.'
     Write-Info 'Keep it OUTSIDE the game directory.'
-    $gameDrive   = [IO.Path]::GetPathRoot($gameDir)
-    $defaultRoot = Join-Path $gameDrive 'IsaacSync'
-    $syncRoot    = Select-FolderPath 'Choose the folder to hold your mod sets' $defaultRoot
+    $defaultRoot = Join-Path ([IO.Path]::GetPathRoot($gameDir)) 'IsaacProfiles'
+    $syncRoot = Select-FolderPath 'Choose the folder to hold your mod profiles' $defaultRoot
     if ([string]::IsNullOrWhiteSpace($syncRoot)) { Write-Err 'No folder chosen. Aborting.'; return }
-    if (-not (Test-Path -LiteralPath $syncRoot)) { New-Item -ItemType Directory -Path $syncRoot -Force | Out-Null }
-    Write-Ok "Sync folder: $syncRoot"
-
     if ($syncRoot.TrimEnd('\').ToLower().StartsWith($gameDir.TrimEnd('\').ToLower())) {
         Write-Err 'That path is inside the game directory. Pick somewhere else.'
         return
     }
+    if (-not (Test-Path -LiteralPath $syncRoot)) { New-Item -ItemType Directory -Path $syncRoot -Force | Out-Null }
+    Write-Ok "Profiles folder: $syncRoot"
 
-    $profiles = @()
-    Write-Info "Default profiles: $($Script:DefaultProfiles -join ', ')"
-    if (Read-YesNo 'Use these two profiles?') {
-        $profiles = $Script:DefaultProfiles
-    } else {
-        $raw = Read-Default 'Profile names (comma separated)' ($Script:DefaultProfiles -join ',')
-        $profiles = @($raw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    # --- Profiles ----------------------------------------------------------
+    Write-Head 'Step 3 of 6: Name your profiles'
+    Write-Info 'Name them after what they are for, e.g. "coop-with-alex",'
+    Write-Info '"heavy-modded", "vanilla-plus", "challenge-run". Add more later'
+    Write-Info 'with:  IsaacProfiles.ps1 -Add <name>'
+    Write-Host ''
+    $existing = @(Get-ChildItem -LiteralPath $syncRoot -Directory -ErrorAction SilentlyContinue |
+                  Where-Object { $_.Name -notmatch '^\.' } | Select-Object -ExpandProperty Name)
+    if ($existing.Count -gt 0) {
+        Write-Info "Folders already here: $($existing -join ', ')"
+        if (Read-YesNo 'Use those as your profiles?') { $profileNames = $existing }
     }
-    if ($profiles.Count -eq 0) { Write-Err 'No profile names given. Aborting.'; return }
+    if (-not $profileNames) {
+        $raw = Read-Default 'Profile names (comma separated)' 'modded,vanilla'
+        $profileNames = @($raw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    $profileNames = @($profileNames | Where-Object { Test-ProfileName $_ } | Select-Object -Unique)
+    if ($profileNames.Count -eq 0) { Write-Err 'No usable profile names. Aborting.'; return }
 
-    foreach ($p in $profiles) {
+    foreach ($p in $profileNames) {
         $dir = Join-Path $syncRoot $p
         if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        Write-Ok "Profile folder ready: $dir"
     }
+    Write-Ok "Profiles: $($profileNames -join ', ')"
 
-    # Keep sync/VCS metadata above the junction target so Isaac never enumerates it.
-    # These two files must each exclude the OTHER tool's metadata, or git will
-    # track Syncthing's marker dirs and Syncthing will replicate a live .git
-    # (which causes index/lock collisions and can corrupt the repo).
+    # Sync/VCS metadata sits above the profile folders so Isaac never
+    # enumerates it - it treats every subfolder of mods\ as a candidate mod.
     $stignore = Join-Path $syncRoot '.stignore'
     if (-not (Test-Path -LiteralPath $stignore)) {
         Set-Content -LiteralPath $stignore -Encoding UTF8 -Value @(
             '// Never let Syncthing replicate a live git directory.'
-            '.git'
-            '.gitignore'
-            '.gitattributes'
-            '.stversions'
-            'README.md'
+            '/.git'; '/.gitignore'; '/.gitattributes'; '/.stversions'
+            '(?d)desktop.ini'; '(?d)Thumbs.db'
         )
         Write-Ok 'Wrote .stignore'
     }
@@ -428,55 +449,45 @@ function Invoke-Setup {
     if (-not (Test-Path -LiteralPath $gitignore)) {
         Set-Content -LiteralPath $gitignore -Encoding UTF8 -Value @(
             '# Syncthing metadata - machine-local, never commit'
-            '.stfolder/'
-            '.stversions/'
-            '.stignore'
-            '.syncthing.*.tmp'
-            ''
-            '# This tool''s local state'
-            'isaac-profiles.json'
+            '.stfolder/'; '.stversions/'; '.stignore'; '.syncthing.*.tmp'
         )
         Write-Ok 'Wrote .gitignore'
     }
     $gitattr = Join-Path $syncRoot '.gitattributes'
     if (-not (Test-Path -LiteralPath $gitattr)) {
         Set-Content -LiteralPath $gitattr -Encoding UTF8 -Value @(
-            '# Byte-for-byte identical checkouts. Without this, git rewrites line'
-            '# endings in .lua/.xml and a cloned copy differs from a synced one.'
+            '# Byte-for-byte identical checkouts. Without this git rewrites line'
+            '# endings in .lua/.xml and a clone differs from a Syncthing copy.'
             '* -text'
         )
         Write-Ok 'Wrote .gitattributes'
     }
 
-    # --- Step 3: migrate existing mods -------------------------------------
-    Write-Head 'Step 3 of 5: Migrate your current mods'
-    $migrateInto = $null
+    # --- Migrate -----------------------------------------------------------
+    Write-Head 'Step 4 of 6: Migrate your current mods'
     if (Test-IsJunction $modsDir) {
-        $existingTarget = Get-JunctionTarget $modsDir
-        Write-Info "mods\ is already a junction$(if($existingTarget){" -> $existingTarget"})."
-        Write-Info 'Nothing to migrate. Setup will re-point it at the end.'
+        Write-Info 'mods\ is already a junction - nothing to migrate.'
     } elseif (Test-Path -LiteralPath $modsDir) {
         $folders = @(Get-ChildItem -LiteralPath $modsDir -Directory -ErrorAction SilentlyContinue)
         Write-Info "Found $($folders.Count) mod folder(s) in the game's mods directory."
         if ($folders.Count -gt 0) {
             Write-Host ''
-            for ($i = 0; $i -lt $profiles.Count; $i++) { Write-Host "    [$($i+1)] copy into '$($profiles[$i])'" }
-            Write-Host "    [a] copy into ALL profiles (prune later)"
-            Write-Host "    [s] skip - I'll populate the folders myself"
+            for ($i = 0; $i -lt $profileNames.Count; $i++) { Write-Host "    [$($i+1)] copy into '$($profileNames[$i])'" }
+            Write-Host '    [a] copy into ALL profiles (prune each later)'
+            Write-Host '    [s] skip'
             Write-Host ''
             $choice = Read-Default 'Choice' 'a'
-            if ($choice -eq 'a') { $migrateInto = $profiles }
-            elseif ($choice -eq 's') { $migrateInto = @() }
-            elseif ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $profiles.Count) {
-                $migrateInto = @($profiles[[int]$choice - 1])
-            } else { $migrateInto = $profiles }
+            $targets = @()
+            if ($choice -eq 'a') { $targets = $profileNames }
+            elseif ($choice -eq 's') { $targets = @() }
+            elseif ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $profileNames.Count) {
+                $targets = @($profileNames[[int]$choice - 1])
+            } else { $targets = $profileNames }
 
-            foreach ($p in $migrateInto) {
+            foreach ($p in $targets) {
                 $dest = Join-Path $syncRoot $p
-                Write-Info "Copying $($folders.Count) folders into '$p'..."
-                foreach ($f in $folders) {
-                    Copy-Item -LiteralPath $f.FullName -Destination $dest -Recurse -Force
-                }
+                Write-Info "Copying into '$p'..."
+                foreach ($f in $folders) { Copy-Item -LiteralPath $f.FullName -Destination $dest -Recurse -Force }
                 Write-Ok "Populated '$p'"
             }
         }
@@ -484,155 +495,80 @@ function Invoke-Setup {
         Write-Info 'No mods directory yet - it will be created as a junction.'
     }
 
-    # --- Step 4: create the junction ---------------------------------------
-    Write-Head 'Step 4 of 5: Point mods\ at a profile'
-    $startProfile = Read-Default "Which profile should be active now? ($($profiles -join '/'))" $profiles[0]
-    if ($profiles -notcontains $startProfile) { Write-Err "Unknown profile '$startProfile'."; return }
-
-    if (Test-IsJunction $modsDir) {
-        Remove-JunctionLink $modsDir
-        Write-Ok 'Removed old junction (target untouched)'
-    } elseif (Test-Path -LiteralPath $modsDir) {
-        # Rename rather than delete. If anything went wrong above, the originals survive.
-        $backup = Join-Path $gameDir ("mods.backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-        Move-Item -LiteralPath $modsDir -Destination $backup
-        Write-Ok "Original mods folder preserved as '$(Split-Path $backup -Leaf)'"
-        Write-Info 'Delete it yourself once you have confirmed everything works.'
-    }
-
-    New-ProfileJunction -LinkPath $modsDir -TargetPath (Join-Path $syncRoot $startProfile)
-    Write-Ok "mods\ -> $syncRoot\$startProfile"
-
-    # --- Clear inherited disable.it markers --------------------------------
-    # Migrated folders almost always carry these from whenever the mod was last
-    # switched off. A mod can then be present but silently disabled, which looks
-    # exactly like the sync having failed. Always clear on first setup.
-    Write-Head 'Clearing stale disable.it markers'
-    $totalCleared = 0
-    foreach ($p in $profiles) {
-        $dir = Join-Path $syncRoot $p
-        $markers = @(Get-ChildItem -LiteralPath $dir -Recurse -Filter 'disable.it' -Force -ErrorAction SilentlyContinue)
-        if ($markers.Count -gt 0) {
-            $markers | Remove-Item -Force -ErrorAction SilentlyContinue
-            Write-Ok "'$p': cleared $($markers.Count) marker(s)"
-            $totalCleared += $markers.Count
-        }
-    }
-    if ($totalCleared -eq 0) { Write-Info 'None found - nothing to clear.' }
-    else { Write-Info 'Those mods are now enabled. Remove folders you do not want.' }
-
-    # --- Which build does each profile run? --------------------------------
-    Write-Head 'REPENTOGON per profile'
-    $rgonExe = Join-Path $gameDir 'Repentogon\isaac-ng.exe'
-    $hasRgon = Test-Path -LiteralPath $rgonExe
-    if ($hasRgon) {
-        Write-Ok "Found REPENTOGON build: $rgonExe"
-        Write-Info 'REPENTOGON runs J273. The vanilla exe is a newer J-version.'
-    } else {
-        Write-Info 'No Repentogon subfolder found - every profile will run vanilla.'
-    }
-
-    # Identify the multiplayer profile FIRST. It is then locked to vanilla and
-    # never offered a REPENTOGON choice - mixed builds desync instantly, and a
-    # stray keystroke here would be invisible until someone gets dropped.
+    # Migrated folders almost always carry disable.it from whenever the mod was
+    # last switched off, so a mod is present but silently disabled. Always clear.
     Write-Host ''
-    Write-Info 'Which profile do you use for online play with other people?'
-    Write-Info "Options: $($profiles -join ', ')  (or 'none')"
-    $onlineProfile = Read-Default 'Online profile' $(if ($profiles -contains 'online') { 'online' } else { 'none' })
-    if ($onlineProfile -ne 'none' -and $profiles -notcontains $onlineProfile) {
-        Write-Warn "'$onlineProfile' is not a profile - treating as 'none'."
-        $onlineProfile = 'none'
-    }
-    if ($onlineProfile -ne 'none') {
-        Write-Ok "'$onlineProfile' is locked to the vanilla build."
-        Write-Info 'Every player must be on the same build. This is not configurable.'
-    }
+    $cleared = 0
+    foreach ($p in $profileNames) { $cleared += Remove-DisableMarkers (Join-Path $syncRoot $p) }
+    if ($cleared -eq 0) { Write-Info 'No stale disable.it markers found.' }
+    else { Write-Ok "Cleared $cleared stale disable.it marker(s) - those mods are now enabled." }
 
-    $useRgon = @()
-    if ($hasRgon) {
-        foreach ($p in $profiles) {
-            if ($p -eq $onlineProfile) { continue }
-            if (Read-YesNo "  Run '$p' with REPENTOGON?" $true) { $useRgon += $p }
-        }
-    }
+    # --- How you launch ----------------------------------------------------
+    Write-Head 'Step 5 of 6: How do you launch Isaac?'
+    Write-Info 'This tool only switches profiles - you start the game yourself.'
+    Write-Host ''
+    Write-Host '    [1] Steam'
+    Write-Host '    [2] REPENTOGON launcher directly'
+    Write-Host '    [3] Something else / not sure'
+    Write-Host ''
+    $launchChoice = Read-Default 'Choice' '1'
+    $ownsOnSteam = ($launchChoice -eq '1')
 
-    # The REPENTOGON build refuses to be started directly - it pops
-    # "This exe should only be launched using the REPENTOGONLauncher" and exits.
-    # So those profiles must go through the launcher, passing the VANILLA exe
-    # via --isaac= exactly as the official Steam launch-option docs describe.
     $launcherExe = $null
-    $rgonMode = 1   # 1 = REPENTOGON on, 0 = off (--repentogonoff). Confirmed on two installs.
-    if ($useRgon.Count -gt 0) {
+    $perProfileBuild = $false
+    if ($launchChoice -in @('1','2')) {
         Write-Host ''
-        $launcherExe = Find-RepentogonLauncher $gameDir
-        if ($launcherExe) {
-            Write-Ok "Launcher: $launcherExe"
-            if (-not (Read-YesNo 'Use this one?')) { $launcherExe = $null }
-        }
-        while (-not $launcherExe) {
-            Write-Info 'REPENTOGONLauncher.exe is required for those profiles.'
-            Write-Info 'It lives OUTSIDE the game folder - wherever you extracted it.'
-            $picked = Select-FilePath 'Select REPENTOGONLauncher.exe' `
-                                      'REPENTOGON Launcher|REPENTOGONLauncher.exe|All executables (*.exe)|*.exe' `
-                                      (Split-Path $gameDir -Parent)
-            $launcherExe = Resolve-LauncherPath $picked
-            if (-not $launcherExe) {
-                Write-Warn 'That is not REPENTOGONLauncher.exe (a folder containing it is fine too).'
-                if (-not (Read-YesNo 'Try again?')) {
-                    Write-Warn 'No launcher - those profiles will fall back to vanilla.'
-                    $useRgon = @()
-                    break
-                }
+        if (Read-YesNo 'Do you use REPENTOGON?' $true) {
+            $launcherExe = Find-RepentogonLauncher $gameDir
+            if ($launcherExe) {
+                Write-Ok "Launcher: $launcherExe"
+                if (-not (Read-YesNo 'Use this one?')) { $launcherExe = $null }
+            }
+            while (-not $launcherExe) {
+                Write-Info 'REPENTOGONLauncher.exe lives OUTSIDE the game folder.'
+                $picked = Select-FilePath 'Select REPENTOGONLauncher.exe' `
+                          'REPENTOGON Launcher|REPENTOGONLauncher.exe|All executables (*.exe)|*.exe' `
+                          (Split-Path $gameDir -Parent)
+                $launcherExe = Resolve-LauncherPath $picked
+                if (-not $launcherExe -and -not (Read-YesNo 'Try again?')) { break }
             }
         }
     }
 
-    $modeMap = @{}
-
-    # --- disable.it handling -----------------------------------------------
-    Write-Head 'Optional: ignore disable.it markers'
-    Write-Info 'Mods carry a disable.it file when switched off. Migrated folders often'
-    Write-Info 'still have them, so a mod can be present but silently disabled.'
-    Write-Info 'Clearing them makes folder contents the only thing that matters -'
-    Write-Info 'strongly recommended for any profile used online.'
-    $stripList = @()
-    foreach ($p in $profiles) {
-        if ($p -eq $onlineProfile) {
-            $stripList += $p
-            Write-Ok "'$p': always cleared (required for online parity)"
-            continue
+    if ($ownsOnSteam) {
+        Write-Head 'Steam launch options'
+        if ($launcherExe) {
+            Write-Info 'To make Steam start REPENTOGON (also required for Remote Play):'
+            Write-Host ''
+            Write-Host '  Steam > The Binding of Isaac: Rebirth > gear icon > Properties'
+            Write-Host '  > General > Launch Options, paste exactly:'
+            Write-Host ''
+            Write-Host "    `"$launcherExe`" --isaac=%command%" -ForegroundColor White
+            Write-Host ''
+            Write-Info 'With that set, this tool can pick the build per profile.'
+            $perProfileBuild = Read-YesNo 'Choose REPENTOGON vs vanilla per profile?' $true
+        } else {
+            Write-Info 'Launch from Steam as normal. Every profile runs vanilla.'
         }
-        if (Read-YesNo "  Clear disable.it markers in '$p' on every switch?" $true) {
-            $stripList += $p
-        }
+    } elseif ($launcherExe) {
+        Write-Info 'Launch from REPENTOGONLauncher.exe as normal.'
+        $perProfileBuild = Read-YesNo 'Choose REPENTOGON vs vanilla per profile?' $true
     }
 
-    # --- Step 5: save + generate -------------------------------------------
-    Write-Head 'Step 5 of 5: Save configuration'
-    $config = [pscustomobject]@{
-        ConfigVersion  = 2
-        IsaacExe       = $exe
-        RepentogonExe  = $(if ($hasRgon) { $rgonExe } else { $null })
-        LauncherExe    = $launcherExe
-        UseRepentogon  = $useRgon
-        RepentogonMode = $rgonMode
-        OnlineProfile  = $onlineProfile
-        GameDir        = $gameDir
-        ModsDir        = $modsDir
-        SyncRoot       = $syncRoot
-        Profiles       = $profiles
-        ActiveProfile  = $startProfile
-        LaunchModeMap  = $modeMap
-        StripDisableIt = $stripList
-        LaunchArgs     = @('--luaheapsize=1024M')
-        SetupDate      = (Get-Date -Format 'o')
+    $useRgon = @()
+    if ($perProfileBuild) {
+        Write-Host ''
+        Write-Warn 'Anyone playing online together must be on the SAME build.'
+        Write-Warn 'REPENTOGON is J273; vanilla is newer. Mixed builds desync at frame 1.'
+        Write-Host ''
+        foreach ($p in $profileNames) {
+            if (Read-YesNo "  Run '$p' with REPENTOGON?" $false) { $useRgon += $p }
+        }
     }
-    Save-Config $config
-    Write-Ok "Config saved to $Script:ConfigPath"
-    Write-PlayScripts $config
 
     # --- Shortcuts ---------------------------------------------------------
-    Write-Head 'Shortcuts'
+    Write-Head 'Step 6 of 6: Shortcuts'
+    Write-Info 'One shortcut per profile. Double-click to switch, then launch the game.'
     Write-Host ''
     Write-Host '    [1] Desktop'
     Write-Host '    [2] Start Menu'
@@ -641,7 +577,7 @@ function Invoke-Setup {
     Write-Host '    [5] None'
     Write-Host ''
     $shortcutDirs = @()
-    switch (Read-Default 'Where should the Play shortcuts go?' '1') {
+    switch (Read-Default 'Choice' '1') {
         '1' { $shortcutDirs = @([Environment]::GetFolderPath('Desktop')) }
         '2' { $shortcutDirs = @((Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs')) }
         '3' { $shortcutDirs = @([Environment]::GetFolderPath('Desktop'),
@@ -655,198 +591,247 @@ function Invoke-Setup {
         }
         default { Write-Info 'Skipped.' }
     }
-    foreach ($dir in $shortcutDirs) {
-        foreach ($name in $profiles) {
-            $title = (Get-Culture).TextInfo.ToTitleCase($name)
-            $bat   = Join-Path $PSScriptRoot "Play $title.bat"
-            $lnk   = Join-Path $dir "Isaac - $title.lnk"
-            if (New-Shortcut -TargetPath $bat -ShortcutPath $lnk -IconPath $exe -WorkDir $PSScriptRoot) {
-                Write-Ok "Shortcut: $lnk"
-            }
-        }
-    }
 
-    # --- Syncing -----------------------------------------------------------
-    Write-Head 'Sharing this with other people'
+    # --- Activate first profile --------------------------------------------
+    Write-Head 'Activating a profile'
+    $startProfile = Read-Default "Which profile should be active now? ($($profileNames -join '/'))" $profileNames[0]
+    if ($profileNames -notcontains $startProfile) { $startProfile = $profileNames[0] }
+
+    if (Test-IsJunction $modsDir) {
+        Remove-JunctionLink $modsDir
+        Write-Ok 'Removed old junction (target untouched)'
+    } elseif (Test-Path -LiteralPath $modsDir) {
+        # Rename, never delete. If anything above went wrong, originals survive.
+        $backup = Join-Path $gameDir ("mods.backup-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        Move-Item -LiteralPath $modsDir -Destination $backup
+        Write-Ok "Original mods folder preserved as '$(Split-Path $backup -Leaf)'"
+        Write-Info 'Delete it yourself once you have confirmed everything works.'
+    }
+    New-ProfileJunction -LinkPath $modsDir -TargetPath (Join-Path $syncRoot $startProfile)
+    Write-Ok "mods\ -> $syncRoot\$startProfile"
+
+    # --- Save ---------------------------------------------------------------
+    $config = [pscustomobject]@{
+        ConfigVersion  = 3
+        IsaacExe       = $exe
+        GameDir        = $gameDir
+        ModsDir        = $modsDir
+        SyncRoot       = $syncRoot
+        Profiles       = $profileNames
+        ActiveProfile  = $startProfile
+        UseRepentogon  = $useRgon
+        PerProfileBuild= $perProfileBuild
+        LauncherExe    = $launcherExe
+        OwnsOnSteam    = $ownsOnSteam
+        ShortcutDirs   = $shortcutDirs
+        SetupDate      = (Get-Date -Format 'o')
+    }
+    Save-Config $config
+    Write-Ok "Config saved to $Script:ConfigPath"
+
     Write-Host ''
-    Write-Host '    [1] Set up Syncthing (live, automatic, handles deletions)'
+    foreach ($p in $profileNames) { Publish-Profile $config $p }
+
+    # --- Sharing ------------------------------------------------------------
+    Write-Head 'Sharing profiles with other people'
+    Write-Host ''
+    Write-Host '    [1] Set up Syncthing (live, automatic, deletions propagate)'
     Write-Host '    [2] Just show me the repo to download from'
-    Write-Host '    [3] Neither - I will sort it out myself'
+    Write-Host '    [3] Neither'
     Write-Host ''
     switch (Read-Default 'Choice' '1') {
         '1' {
-            Write-Head 'Syncthing setup'
             $st = Get-SyncthingInfo
             if (-not $st) {
-                Write-Info 'Syncthing does not appear to be installed on this machine.'
+                Write-Info 'Syncthing does not appear to be installed.'
                 Write-Host ''
-                Write-Host '    Official builds (always latest):'
-                Write-Host '      https://syncthing.net/downloads/'
+                Write-Host '    https://syncthing.net/downloads/'
+                Write-Host '    https://github.com/canton7/SyncTrayzor/releases/latest  (easier on Windows)'
                 Write-Host ''
-                Write-Host '    SyncTrayzor - easier on Windows, adds a tray icon and'
-                Write-Host '    starts with the machine:'
-                Write-Host '      https://github.com/canton7/SyncTrayzor/releases/latest'
-                Write-Host ''
-                if (Read-YesNo 'Open the download page now?') {
-                    Start-Process 'https://syncthing.net/downloads/'
-                }
-                Write-Info 'Install it, then follow the steps below.'
+                if (Read-YesNo 'Open the download page now?') { Start-Process 'https://syncthing.net/downloads/' }
             } else {
                 Write-Ok 'Syncthing is already installed.'
                 Write-Host "     GUI address : http://$($st.Address)"
                 Write-Host "     API key     : $($st.ApiKey)"
-                Write-Host "     Config file : $($st.ConfigPath)"
-                if (Read-YesNo 'Open the Syncthing web GUI now?') {
-                    Start-Process "http://$($st.Address)"
-                }
+                if (Read-YesNo 'Open the Syncthing web GUI now?') { Start-Process "http://$($st.Address)" }
             }
             Write-Host ''
-            Write-Host '  In the Syncthing GUI:'
-            Write-Host '  1. Click "Add Folder"'
-            Write-Host "  2. Folder Path:  $syncRoot"
-            Write-Host '  3. Share it with the other people'
-            Write-Host '  4. On THEIR machine set the folder type to "Receive Only" so'
-            Write-Host '     their changes never overwrite yours. Yours stays "Send Only".'
-            Write-Host '  5. Turn on File Versioning on their side for an undo.'
+            Write-Host '  In Syncthing: Add Folder'
+            Write-Host "    Folder Path:  $syncRoot"
+            Write-Host '    Share it, then set THEIR side to "Receive Only" and yours to'
+            Write-Host '    "Send Only" so your deletions reach them and their local'
+            Write-Host '    experiments never travel back.'
         }
         '2' {
-            Write-Head 'Repository'
             Write-Host "  $Script:RepoUrl"
             Write-Host ''
-            Write-Host '  Clone or download it directly into:'
-            Write-Host "     $syncRoot"
-            Write-Host '  Then re-run this setup and point it at that folder.'
+            Write-Host "  Clone or download into:  $syncRoot"
         }
         default { Write-Info 'Skipped.' }
     }
 
     Write-Head 'Done'
-    Write-Host "  Use 'Play Online.bat' / 'Play Singleplayer.bat' from now on." -ForegroundColor White
+    Write-Host "  Active profile: $startProfile" -ForegroundColor White
+    Write-Host '  Switch with the shortcuts, then launch Isaac however you normally do.'
     Write-Host ''
-    Write-Warn 'For online play, everyone must have IDENTICAL folder contents.'
-    Write-Warn 'Not the same enabled list - the same files. Isaac desyncs otherwise.'
+    Write-Warn 'For online play everyone needs IDENTICAL profile contents - same files,'
+    Write-Warn 'not just the same names - and the same game build.'
     Write-Host ''
 }
 
 # ---------------------------------------------------------------------------
-# Profile switch
+# Commands
 # ---------------------------------------------------------------------------
 
-function Invoke-Switch {
-    param([string]$Name)
-
+function Assert-Config {
     $config = Get-Config
-    if (-not $config) { Write-Err 'No config found. Run with -Setup first.'; exit 1 }
-
-    # A config written before build selection existed has no UseRepentogon key.
-    # Falling back to vanilla silently would launch the wrong build, which on an
-    # online session desyncs everyone. Stop instead.
-    if (-not $config.PSObject.Properties['ConfigVersion'] -or [int]$config.ConfigVersion -lt 2) {
+    if (-not $config) { Write-Err 'No config found. Run Setup.bat first.'; exit 1 }
+    if (-not $config.PSObject.Properties['ConfigVersion'] -or [int]$config.ConfigVersion -lt 3) {
         Write-Err 'Your isaac-profiles.json was written by an older version.'
-        Write-Err 'It has no REPENTOGON build selection, so this would launch the'
-        Write-Err 'wrong executable. Run Setup.bat again to regenerate it.'
+        Write-Err 'Run Setup.bat again to regenerate it.'
         exit 1
     }
+    return $config
+}
 
+function Invoke-Use {
+    param([string]$Name)
+    $config = Assert-Config
     if ($config.Profiles -notcontains $Name) {
         Write-Err "Unknown profile '$Name'. Known: $($config.Profiles -join ', ')"
         exit 1
     }
-
     $target = Join-Path $config.SyncRoot $Name
     if (-not (Test-Path -LiteralPath $target)) { Write-Err "Profile folder missing: $target"; exit 1 }
 
     $modsDir = $config.ModsDir
-
     if (Test-Path -LiteralPath $modsDir) {
         if (Test-IsJunction $modsDir) {
             Remove-JunctionLink $modsDir
         } else {
-            # Someone recreated a real mods folder. Never delete it silently.
             Write-Err "'$modsDir' is a real folder, not a junction."
             Write-Err 'Refusing to touch it. Move it aside, then re-run.'
             exit 1
         }
     }
 
-    # Clear stale disable.it markers BEFORE the junction exists, so the game
-    # never sees a half-toggled set.
-    if ($config.StripDisableIt -and $config.StripDisableIt -contains $Name) {
-        Remove-DisableMarkers $target
-    }
-
+    Remove-DisableMarkers $target | Out-Null
     New-ProfileJunction -LinkPath $modsDir -TargetPath $target
-    $count = @(Get-ChildItem -LiteralPath $target -Directory -ErrorAction SilentlyContinue).Count
-    Write-Ok "Profile '$Name' active ($count mod folders)"
 
-    if ($config.LaunchModeMap -and $config.LaunchModeMap.PSObject.Properties.Name -contains $Name) {
-        Set-LauncherMode ([int]$config.LaunchModeMap.$Name)
+    $count = @(Get-ChildItem -LiteralPath $target -Directory -ErrorAction SilentlyContinue).Count
+    Write-Host ''
+    Write-Ok "Active profile: $Name  ($count mods)"
+
+    if ($config.PerProfileBuild) {
+        $wantRgon = ($config.UseRepentogon -and $config.UseRepentogon -contains $Name)
+        if (Set-LauncherMode $(if ($wantRgon) { 1 } else { 0 })) {
+            Write-Ok $(if ($wantRgon) { 'Build: REPENTOGON' } else { 'Build: vanilla' })
+        }
     }
 
     $config.ActiveProfile = $Name
     Save-Config $config
 
-    if (-not $NoLaunch) {
-        # Launch the executable directly with the exact command line the
-        # launcher itself uses. The launcher's [Shared] LaunchMode key is not
-        # reliable to drive from outside - it gets rewritten on launcher exit -
-        # so we bypass it entirely and pick the build ourselves.
-        $wantRgon = ($config.UseRepentogon -and $config.UseRepentogon -contains $Name)
+    Write-Info $(if ($config.OwnsOnSteam) { 'Now launch Isaac from Steam.' } else { 'Now launch Isaac as usual.' })
+    Write-Host ''
+}
 
-        # Belt and braces: even if someone hand-edits the json, the designated
-        # online profile never runs a different build from everyone else.
-        if ($config.OnlineProfile -and $Name -eq $config.OnlineProfile) {
-            $wantRgon = $false
+function Invoke-List {
+    $config = Assert-Config
+    Write-Head 'Isaac mod profiles'
+    foreach ($p in $config.Profiles) {
+        $dir = Join-Path $config.SyncRoot $p
+        $n = @(Get-ChildItem -LiteralPath $dir -Directory -ErrorAction SilentlyContinue).Count
+        $mark = if ($p -eq $config.ActiveProfile) { '*' } else { ' ' }
+        $build = ''
+        if ($config.PerProfileBuild) {
+            $build = if ($config.UseRepentogon -contains $p) { '  [REPENTOGON]' } else { '  [vanilla]' }
         }
-
-        $launchArgs = @($config.LaunchArgs)
-
-        if ($wantRgon) {
-            if (-not ($config.LauncherExe -and (Test-Path -LiteralPath $config.LauncherExe))) {
-                Write-Err "Profile '$Name' needs REPENTOGON, but REPENTOGONLauncher.exe"
-                Write-Err 'is missing from the config. Re-run Setup.bat.'
-                exit 1
-            }
-            # Point the launcher at the VANILLA exe. It resolves that to the
-            # Repentogon build itself. Starting Repentogon\isaac-ng.exe directly
-            # trips its "launch me through the launcher" guard and exits.
-            Set-LauncherMode ([int]$config.RepentogonMode)
-            $launcherDir = Split-Path $config.LauncherExe -Parent
-            $rgonArgs = "--isaac=`"$($config.IsaacExe)`""
-            Write-Ok 'Launching via REPENTOGON launcher'
-            Write-Info "$($config.LauncherExe) $rgonArgs"
-            Start-Process -FilePath $config.LauncherExe -ArgumentList $rgonArgs -WorkingDirectory $launcherDir
-        } else {
-            $exeToRun = $config.IsaacExe
-            $launchArgs += '--repentogonoff'
-            Write-Ok 'Launching vanilla build'
-            Write-Info "$exeToRun $($launchArgs -join ' ')"
-            Start-Process -FilePath $exeToRun -ArgumentList $launchArgs -WorkingDirectory $config.GameDir
-        }
-
-        Write-Host ''
-        Write-Info 'Verify in log.txt: "Game Version:" must match on every player'
-        Write-Info 'before an online session. J273 = REPENTOGON, newer = vanilla.'
+        Write-Host ("   {0} {1,-24} {2,3} mods{3}" -f $mark, $p, $n, $build)
     }
+    Write-Host ''
+    Write-Info "* = active.  Folder: $($config.SyncRoot)"
+    Write-Host ''
+}
+
+function Invoke-Add {
+    param([string]$Name)
+    $config = Assert-Config
+    if (-not (Test-ProfileName $Name)) { Write-Err "Invalid profile name '$Name'."; exit 1 }
+    if ($config.Profiles -contains $Name) { Write-Err "Profile '$Name' already exists."; exit 1 }
+
+    $dir = Join-Path $config.SyncRoot $Name
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+
+    $config.Profiles = @($config.Profiles) + $Name
+
+    if ($config.PerProfileBuild) {
+        if (Read-YesNo "Run '$Name' with REPENTOGON?" $false) {
+            $config.UseRepentogon = @($config.UseRepentogon) + $Name
+        }
+    }
+
+    # Offer to seed from an existing profile - copying then pruning is usually
+    # faster than assembling a set from nothing.
+    if ($config.Profiles.Count -gt 1) {
+        Write-Host ''
+        if (Read-YesNo 'Copy mods from an existing profile as a starting point?' $false) {
+            $src = Read-Default "Copy from which? ($(($config.Profiles | Where-Object { $_ -ne $Name }) -join '/'))" $config.ActiveProfile
+            $srcDir = Join-Path $config.SyncRoot $src
+            if (Test-Path -LiteralPath $srcDir) {
+                Get-ChildItem -LiteralPath $srcDir -Directory | ForEach-Object {
+                    Copy-Item -LiteralPath $_.FullName -Destination $dir -Recurse -Force
+                }
+                Remove-DisableMarkers $dir | Out-Null
+                Write-Ok "Copied from '$src'"
+            } else { Write-Warn "'$src' not found - left empty." }
+        }
+    }
+
+    Save-Config $config
+    Write-Ok "Created profile '$Name'  ($dir)"
+    Publish-Profile $config $Name
+    Write-Host ''
+}
+
+function Invoke-Remove {
+    param([string]$Name)
+    $config = Assert-Config
+    if ($config.Profiles -notcontains $Name) { Write-Err "Unknown profile '$Name'."; exit 1 }
+    if ($config.ActiveProfile -eq $Name) {
+        Write-Err "'$Name' is active. Switch to another profile first."
+        exit 1
+    }
+    $config.Profiles      = @($config.Profiles | Where-Object { $_ -ne $Name })
+    $config.UseRepentogon = @($config.UseRepentogon | Where-Object { $_ -ne $Name })
+    Save-Config $config
+
+    # Remove generated launchers, but never the mod folder itself.
+    Remove-Item -LiteralPath (Join-Path $PSScriptRoot "Switch to $Name.bat") -Force -ErrorAction SilentlyContinue
+    foreach ($dir in @($config.ShortcutDirs)) {
+        if ($dir) { Remove-Item -LiteralPath (Join-Path $dir "Isaac profile - $Name.lnk") -Force -ErrorAction SilentlyContinue }
+    }
+
+    Write-Ok "Removed '$Name' from the profile list."
+    Write-Info "Its folder is untouched: $(Join-Path $config.SyncRoot $Name)"
+    Write-Host ''
 }
 
 # ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 try {
-    if ($Setup) { Invoke-Setup }
-    elseif ($ProfileName) { Invoke-Switch $ProfileName }
+    if     ($Setup)   { Invoke-Setup }
+    elseif ($Use)     { Invoke-Use $Use }
+    elseif ($Add)     { Invoke-Add $Add }
+    elseif ($Remove)  { Invoke-Remove $Remove }
+    elseif ($List)    { Invoke-List }
     elseif (-not (Test-Path -LiteralPath $Script:ConfigPath)) { Invoke-Setup }
     else {
-        $config = Get-Config
-        Write-Head 'Isaac Mod Profile Manager'
-        Write-Host "  Active profile : $($config.ActiveProfile)"
-        Write-Host "  Sync root      : $($config.SyncRoot)"
-        Write-Host "  Profiles       : $($config.Profiles -join ', ')"
-        Write-Host ''
-        Write-Host '  Switch with:  .\IsaacProfiles.ps1 -ProfileName <name>'
-        Write-Host '  Reconfigure:  .\IsaacProfiles.ps1 -Setup'
+        Invoke-List
+        Write-Host '  Switch :  .\IsaacProfiles.ps1 -Use <name>'
+        Write-Host '  Add    :  .\IsaacProfiles.ps1 -Add <name>'
+        Write-Host '  Remove :  .\IsaacProfiles.ps1 -Remove <name>'
+        Write-Host '  Redo   :  .\IsaacProfiles.ps1 -Setup'
         Write-Host ''
     }
 } catch {

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>IsaacProfileManager</AssemblyName>
+    <RootNamespace>IsaacProfileManager</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Junction creation needs no elevation, and asking for it would make a
+         folder-linking tool look like malware to a modding audience. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IsaacProfileManager.Core\IsaacProfileManager.Core.csproj" />
+  </ItemGroup>
+
+</Project>
