@@ -152,7 +152,7 @@ This tool moves other people's mod collections and save files around, so:
   folder, Isaac still running — all stop with an explanation.
 - **No administrator required.** Creating a junction doesn't need it.
 
-There are **208 automated tests**, most of them exercising exactly these refusals
+There are **230 automated tests**, most of them exercising exactly these refusals
 against throwaway directories.
 
 ---

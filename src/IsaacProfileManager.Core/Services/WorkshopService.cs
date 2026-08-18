@@ -49,6 +49,13 @@ public sealed class WorkshopService : IWorkshopService
 
     public static string ItemUrl(string id) => $"https://steamcommunity.com/sharedfiles/filedetails/?id={id}";
 
+    /// <summary>
+    /// Wrap a Community URL so it opens inside the Steam client rather than a
+    /// system browser. Subscribing needs a logged-in Steam session, so the
+    /// in-client browser is where these links are actually useful.
+    /// </summary>
+    public static string InSteamClient(string httpUrl) => $"steam://openurl/{httpUrl}";
+
     private static readonly string[] ImageNames = { "thumb.png", "thumbnail.png", "icon.png", "preview.png", "cover.png" };
 
     public string? WorkshopRoot { get; }

@@ -59,9 +59,10 @@ public sealed class WorkshopViewModel : ObservableObject
         SelectMissingCommand = new RelayCommand(() => { foreach (var i in Items) i.Selected = !i.InLibrary; });
         OpenLibraryCommand = new RelayCommand(OpenLibrary, () => Library is not null);
         OpenWorkshopPageCommand = new RelayCommand(OpenWorkshopPage, () => SelectedItem is not null);
-        BrowseWorkshopCommand = new RelayCommand(() => Open(WorkshopService.BrowseUrl));
+        // Opened in the Steam client, where Subscribe and Unsubscribe work.
+        BrowseWorkshopCommand = new RelayCommand(() => Open(WorkshopService.InSteamClient(WorkshopService.BrowseUrl)));
         OpenSubscriptionsCommand = new RelayCommand(
-            () => Open(WorkshopService.SubscribedItemsUrl(AccountId)!),
+            () => Open(WorkshopService.InSteamClient(WorkshopService.SubscribedItemsUrl(AccountId)!)),
             () => WorkshopService.SubscribedItemsUrl(AccountId) is not null);
         OpenContentFolderCommand = new RelayCommand(OpenContentFolder, () => ContentRoot is not null);
     }
@@ -299,6 +300,6 @@ public sealed class WorkshopViewModel : ObservableObject
     private void OpenWorkshopPage()
     {
         if (SelectedItem is null) return;
-        Open(WorkshopService.ItemUrl(SelectedItem.Id));
+        Open(WorkshopService.InSteamClient(WorkshopService.ItemUrl(SelectedItem.Id)));
     }
 }

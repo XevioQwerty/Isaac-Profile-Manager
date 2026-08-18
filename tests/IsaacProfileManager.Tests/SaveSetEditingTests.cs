@@ -181,4 +181,19 @@ public class WorkshopUrlTests
         Assert.Equal("https://steamcommunity.com/app/250900/workshop/", WorkshopService.BrowseUrl);
         Assert.Contains("id=3127536138", WorkshopService.ItemUrl("3127536138"));
     }
+
+    [Fact]
+    public void InSteamClient_WrapsTheUrlSoItOpensInsideSteam()
+    {
+        // Subscribing needs a logged-in Steam session, so these must not open in
+        // a system browser.
+        Assert.Equal("steam://openurl/https://steamcommunity.com/app/250900/workshop/",
+                     WorkshopService.InSteamClient(WorkshopService.BrowseUrl));
+
+        Assert.StartsWith("steam://openurl/https://steamcommunity.com/profiles/",
+                          WorkshopService.InSteamClient(WorkshopService.SubscribedItemsUrl("351019201")!));
+
+        Assert.Equal("steam://openurl/https://steamcommunity.com/sharedfiles/filedetails/?id=3127536138",
+                     WorkshopService.InSteamClient(WorkshopService.ItemUrl("3127536138")));
+    }
 }
