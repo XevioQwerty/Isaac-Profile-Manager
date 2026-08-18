@@ -249,7 +249,23 @@ Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
 git clone https://github.com/XevioQwerty/Isaac-Profile-Manager
-cd Isaac-Profile-Manager
+```
+
+Then build and install it somewhere permanent, with a Start Menu entry:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\Install.ps1
+```
+
+That publishes to `%LOCALAPPDATA%\Programs\IsaacProfileManager` and adds a
+shortcut, so you launch a real program rather than a script — and re-running it
+is how you update after pulling. Add `-DesktopShortcut` for one on the desktop,
+or `-Destination 'D:\Apps\IsaacProfileManager'` to put it wherever you like. No
+administrator needed.
+
+To build without installing:
+
+```bash
 dotnet test
 dotnet publish src/IsaacProfileManager -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 ```
