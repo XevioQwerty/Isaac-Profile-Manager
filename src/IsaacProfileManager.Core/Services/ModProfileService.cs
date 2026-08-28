@@ -13,12 +13,35 @@ public sealed record ActivationResult(
 /// <summary>A manifest on disk that the config does not yet know about — typically one synced from someone else.</summary>
 public sealed record DiscoveredProfile(string Name, int ModCount, int MissingFromLibrary, string Notes);
 
+/// <summary>What deleting a profile actually did.</summary>
+public sealed record ProfileRemoval(
+    string Name,
+    int LinksRemoved,
+    IReadOnlyList<string> MovedToBackup,
+    string? BackupPath,
+    bool FolderDeleted,
+    bool ManifestDeleted)
+{
+    public string Summary
+    {
+        get
+        {
+            var parts = new List<string> { $"Removed '{Name}'" };
+            if (LinksRemoved > 0) parts.Add($"{LinksRemoved} link(s) unlinked");
+            if (FolderDeleted) parts.Add("folder deleted");
+            if (ManifestDeleted) parts.Add("manifest deleted");
+            if (MovedToBackup.Count > 0) parts.Add($"{MovedToBackup.Count} real folder(s) moved to .backup");
+            return string.Join(", ", parts) + ".";
+        }
+    }
+}
+
 public interface IModProfileService
 {
     IReadOnlyList<ModProfile> List(AppConfig config);
     ActivationResult Activate(AppConfig config, string name);
     void Add(AppConfig config, string name, string? seedFromProfile = null);
-    void Remove(AppConfig config, string name);
+    ProfileRemoval Remove(AppConfig config, string name, bool deleteFolder = true);
     string? GetActiveProfileFromDisk(AppConfig config);
 }
 
@@ -252,19 +275,97 @@ public sealed class ModProfileService : IModProfileService
         _store.Save(config);
     }
 
-    /// <summary>Forget a profile. The folder on disk is left alone — it is the user's mods.</summary>
-    public void Remove(AppConfig config, string name)
+    /// <summary>
+    /// Delete a profile: its folder, its manifest, and its entry in the config.
+    ///
+    /// A profile folder is mostly junctions into the shared library, so this can
+    /// never be a recursive delete — that would follow the links and take the
+    /// library with it. Links are removed one at a time with
+    /// <c>recursive: false</c>, which unlinks without touching the target.
+    ///
+    /// A real folder inside a profile is a different matter: a hand-installed mod
+    /// has no other copy, so those are moved to <c>.backup</c> rather than
+    /// deleted. The profile stops existing either way; nothing irreplaceable does.
+    /// </summary>
+    public ProfileRemoval Remove(AppConfig config, string name, bool deleteFolder = true)
     {
         if (!config.Profiles.Contains(name, StringComparer.OrdinalIgnoreCase))
             throw new ArgumentException($"Unknown profile '{name}'.", nameof(name));
         if (string.Equals(config.ActiveProfile, name, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"'{name}' is active. Switch to another profile first.");
 
+        var links = 0;
+        var moved = new List<string>();
+        string? backupPath = null;
+        var folderDeleted = false;
+        var manifestDeleted = false;
+
+        var directory = ProfilePath(config, name);
+
+        if (deleteFolder && Directory.Exists(directory))
+        {
+            // A profile folder that is itself a link is not ours to delete; the
+            // real data lives wherever it points.
+            if ((new DirectoryInfo(directory).Attributes & FileAttributes.ReparsePoint) != 0)
+                throw new UnsafePathException(
+                    $"'{directory}' is a link, not a real folder. Refusing to delete it.");
+
+            foreach (var child in Directory.GetDirectories(directory))
+            {
+                if (_junctions.IsJunction(child))
+                {
+                    _junctions.RemoveLink(child);   // never recursive: the target is the library
+                    links++;
+                    continue;
+                }
+
+                backupPath ??= Path.Combine(BackupRoot(config), DateTime.Now.ToString("yyyyMMdd-HHmmss"), name);
+                Directory.CreateDirectory(backupPath);
+                Directory.Move(child, Path.Combine(backupPath, Path.GetFileName(child)));
+                moved.Add(Path.GetFileName(child));
+            }
+
+            foreach (var file in Directory.GetFiles(directory))
+            {
+                backupPath ??= Path.Combine(BackupRoot(config), DateTime.Now.ToString("yyyyMMdd-HHmmss"), name);
+                Directory.CreateDirectory(backupPath);
+                File.Move(file, Path.Combine(backupPath, Path.GetFileName(file)), overwrite: true);
+            }
+
+            try
+            {
+                Directory.Delete(directory, recursive: false);
+                folderDeleted = true;
+            }
+            catch (IOException)
+            {
+                // Something arrived while we worked, or a handle is open. Leaving
+                // the folder is a far better outcome than forcing a delete.
+            }
+        }
+
+        var manifest = ManifestPath(config, name);
+        if (deleteFolder && manifest is not null && File.Exists(manifest))
+        {
+            File.Delete(manifest);
+            manifestDeleted = true;
+        }
+
         config.Profiles.RemoveAll(p => string.Equals(p, name, StringComparison.OrdinalIgnoreCase));
         config.UseRepentogon.RemoveAll(p => string.Equals(p, name, StringComparison.OrdinalIgnoreCase));
         config.ProfileNotes.Remove(name);
         _store.Save(config);
+
+        return new ProfileRemoval(name, links, moved, backupPath, folderDeleted, manifestDeleted);
     }
+
+    private static string BackupRoot(AppConfig config) =>
+        Path.Combine(config.SyncRoot!, ".backup");
+
+    private static string? ManifestPath(AppConfig config, string name) =>
+        string.IsNullOrWhiteSpace(config.SyncRoot)
+            ? null
+            : Path.Combine(config.SyncRoot, ModLibraryService.ManifestFolderName, name + ".json");
 
     public void SetUseRepentogon(AppConfig config, string name, bool useRepentogon)
     {

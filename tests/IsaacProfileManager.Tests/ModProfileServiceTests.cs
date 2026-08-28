@@ -178,19 +178,26 @@ public class ModProfileServiceTests
     }
 
     [Fact]
-    public void Remove_ForgetsTheProfileButNeverTouchesItsMods()
+    public void Remove_DeletesTheProfileButNeverDestroysAMod()
     {
+        // Remove used to leave the folder behind, which meant "deleted" profiles
+        // accumulated on disk forever. It now deletes the folder — but a real mod
+        // folder inside one can be the only copy in existence, so those move to
+        // .backup rather than being destroyed.
         using var temp = new TempDir();
         var (service, config, _) = Build(temp, "coop", "heavy");
         temp.File(@"sync\heavy\ModB\main.lua", "-- b");
         config.UseRepentogon.Add("heavy");
         config.ActiveProfile = "coop";
 
-        service.Remove(config, "heavy");
+        var removal = service.Remove(config, "heavy");
 
         Assert.DoesNotContain("heavy", config.Profiles);
         Assert.DoesNotContain("heavy", config.UseRepentogon);
-        Assert.True(File.Exists(temp.Combine("sync", "heavy", "ModB", "main.lua")));
+        Assert.False(Directory.Exists(temp.Combine("sync", "heavy")));
+
+        Assert.Equal(new[] { "ModB" }, removal.MovedToBackup);
+        Assert.True(File.Exists(Path.Combine(removal.BackupPath!, "ModB", "main.lua")));
     }
 
     [Fact]
