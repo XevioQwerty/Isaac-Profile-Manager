@@ -238,22 +238,66 @@ public sealed class ShareImportRunner
             var available = _library.ListEntries().ToHashSet(StringComparer.OrdinalIgnoreCase);
             var mods = share.Mods.Where(available.Contains).ToList();
 
-            _library.SaveManifest(profileName, new ProfileManifest { Mods = mods, Notes = share.Notes });
-            var report = _library.Materialise(profileName, _library.LoadManifest(profileName));
-            written = profileName;
+            // Materialise removes every junction the manifest does not name. So
+            // writing a manifest built from "what arrived" is destructive the
+            // moment nothing arrives: it empties a profile of that name.
+            // Observed on a real machine, where an import that downloaded
+            // nothing left an existing 25-mod profile with no links at all.
+            var existing = CurrentProfileMods(profileName);
+            var wouldRemove = existing.Except(mods, StringComparer.OrdinalIgnoreCase).ToList();
 
-            progress?.Report($"Built '{profileName}' with {mods.Count} mods");
+            if (mods.Count == 0)
+            {
+                warnings.Add(existing.Count > 0
+                    ? $"Nothing was downloaded, so '{profileName}' was left alone rather than emptied. " +
+                      "Fix the download problem and import again."
+                    : $"Nothing was downloaded, so no profile was created. '{profileName}' would have been empty.");
+            }
+            else if (wouldRemove.Count > 0 && failed.Count > 0)
+            {
+                warnings.Add($"'{profileName}' was left alone. Rebuilding it now would drop " +
+                             $"{wouldRemove.Count} mod(s) it already has, because {failed.Count} did not download. " +
+                             "Fix those and import again.");
+            }
+            else
+            {
+                _library.SaveManifest(profileName, new ProfileManifest { Mods = mods, Notes = share.Notes });
+                var report = _library.Materialise(profileName, _library.LoadManifest(profileName));
+                written = profileName;
 
-            var short_ = share.Mods.Count - mods.Count;
-            if (short_ > 0)
-                warnings.Add($"'{profileName}' was built with {short_} fewer mod(s) than the share lists, " +
-                             "because those did not arrive.");
+                progress?.Report($"Built '{profileName}' with {mods.Count} mods");
 
-            foreach (var name in report.LeftAlone)
-                warnings.Add($"'{name}' in {profileName} is a real folder, not a link, and was left alone.");
+                var missing = share.Mods.Count - mods.Count;
+                if (missing > 0)
+                    warnings.Add($"'{profileName}' was built with {missing} fewer mod(s) than the share lists, " +
+                                 "because those did not arrive.");
+
+                foreach (var name in report.LeftAlone)
+                    warnings.Add($"'{name}' in {profileName} is a real folder, not a link, and was left alone.");
+            }
         }
 
         return new ShareImportReport(installed, failed, warnings, mismatches, written);
+    }
+
+    /// <summary>
+    /// What a profile of this name currently holds: its manifest if it has one,
+    /// otherwise the links already in its folder. An adopted profile has
+    /// junctions and no manifest, and is just as destroyable.
+    /// </summary>
+    private IReadOnlyList<string> CurrentProfileMods(string profileName)
+    {
+        try
+        {
+            var manifest = _library.LoadManifest(profileName).Mods;
+            if (manifest.Count > 0) return manifest;
+        }
+        catch (ConfigSchemaMismatchException)
+        {
+            // Unreadable manifest is not evidence the profile is empty.
+        }
+
+        return _library.Analyse(profileName).Select(entry => entry.Name).ToList();
     }
 
     /// <summary>Turn a helper item state into something worth reading.</summary>
