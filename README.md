@@ -60,6 +60,60 @@ profiles. The overwrite problem stops existing rather than being worked around.
 
 ![Importing from the Workshop](docs/screenshots/workshop.png)
 
+### Updates, without resubscribing to everything by hand
+
+Cutting Steam loose costs you updates: a mod in the library is a detached copy,
+so when its author pushes a fix, nothing tells you.
+
+**Check for updates** asks the Workshop when each mod last changed. It needs no
+subscription and no Steam client, so it disturbs nothing and you can run it as
+often as you like. On the reference library it found 9 of 40 mods had moved on.
+
+**Update everything stale** then resubscribes to *only those mods*, waits for
+Steam to download them, replaces the library copies, and unsubscribes again. All
+your profiles are junctions into the library, so they all pick up the new files
+at once — there is no per-profile update step.
+
+Three things it is careful about:
+
+- Steam must be running and **Isaac must be closed**. Subscribing on its own does
+  not touch `mods\`, but launching the game while subscribed is what makes Steam
+  re-lay mods into whichever profile is active.
+- The old copy of each mod is moved to `.backup`, never overwritten in place —
+  and it is a genuine replace, so files the author *deleted* upstream disappear
+  from your copy too. A merge would leave your bytes matching nobody.
+- Updated mods have new hashes. **Everyone you play with needs the same update**,
+  or you will desync. The app re-records hashes afterwards so you can send a
+  fresh export.
+
+The unsubscribe runs even if something fails partway, because an account left
+subscribed is exactly the state that starts re-laying mods into your profiles.
+
+### Send someone your whole mod set as one string
+
+Sharing a modpack used to mean sending a folder. Now it is a **share code**: one
+string holding every mod's Workshop id, its library name, and its hash.
+
+Whoever you send it to pastes it into **Import a code...**, sees exactly what
+will happen before committing, and the app downloads the whole set — subscribing
+to only the mods they are missing, taking the files, and unsubscribing again. It
+then builds the profile and checks every mod against your hashes, so you both
+know you match byte for byte.
+
+Mods they already have with a matching hash are skipped, so a second person
+joining a group only downloads the difference.
+
+It is not a short code, and it cannot be. A Workshop id is essentially a random
+34-bit number and a hash is incompressible, so a 40-mod set lands around 3.5 KB.
+Send it as a message or a file rather than reading it out. **Import also accepts
+a Steam collection id**, which is ten digits — short, browsable, and handy for
+grabbing a public modpack, but a collection cannot carry hashes, so it can tell
+you which mods to get and not whether you match.
+
+Anything that is not a Workshop item — a hand-installed mod — travels in the code
+as a name so the recipient is told about it, but nothing can download it for
+them. The app says so plainly at both ends.
+
 ### Prove you and your friends match
 
 Same folder name with different contents is a real desync cause and it's

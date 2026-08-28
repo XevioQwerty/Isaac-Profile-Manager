@@ -22,6 +22,8 @@
 | 14. README revamp + screenshots | **Done** |
 | 15. Profile discovery, import, activate-materialises | **Done** |
 | 16. Backup retention, log session archiving | **Done** |
+| 17. Workshop update check + resubscribe cycle | **Done** |
+| 18. Bulk unsubscribe, share codes, collection import | **Done** |
 
 Two conventions worth keeping:
 
@@ -34,6 +36,16 @@ Two conventions worth keeping:
   `LogArchiveService` all take an override for their LocalAppData folder.
   Without it the tests scanned and deleted real machine state, which hid
   failures and littered 75 files into `%LOCALAPPDATA%`.
+
+A third convention arrived with step 17:
+
+- **The app now ships two executables.** `ipm-steam-helper.exe` is win-x86
+  because Isaac's `steam_api.dll` is 32-bit; it loads the game's own copy and
+  speaks JSON lines over stdout. It is published by a target in the app's csproj
+  and added to `ResolvedFileToPublish` *inside* that target — a static `Content`
+  item silently publishes nothing on a clean tree, because the file does not
+  exist when items are evaluated. `ExcludeFromSingleFile` keeps it a loose exe;
+  a 64-bit bundle cannot run a 32-bit payload.
 
 Still not built: live log tail via `FileSystemWatcher`.
 

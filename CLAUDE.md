@@ -207,6 +207,75 @@ Run the tests before touching anything under `Services/`:
 - Before offering a lock, the check that matters is "subscribed items missing
   from the active profile", and it must be zero. A raw installed-item count does
   not answer that question.
+### Keeping detached mods updated
+
+- A library mod is detached from Steam, so it **never receives updates**. The
+  cheap way to find out what has moved is the keyless Web API
+  `POST https://api.steampowered.com/ISteamRemoteStorage/GetPublishedFileDetails/v1/`
+  with `itemcount=N` and `publishedfileids[i]`. Verified 2026-08-27 against all
+  40 Workshop ids in the reference library: it answers for items you are **not**
+  subscribed to, needs no API key and no Steam client, and returned 9 stale of
+  40. Note `file_size` comes back as a *string* and `time_updated` as a number.
+- **`SteamAPI_Init` is not in `steam_api.dll`'s export table.** In the current
+  SDK it is a header inline. The exported door for a flat-API consumer is
+  `SteamAPI_InitFlat(SteamErrMsg*)` returning `ESteamAPIInitResult` (0 = OK),
+  and it fills in Steam's own explanation on failure. Confirmed by parsing the
+  PE export directory — grepping the binary for strings finds `SteamAPI_Init`
+  and is misleading, because it is a string and not an export.
+- Isaac's `steam_api.dll` is **32-bit** (machine `0x14c`), so the x64 app cannot
+  load it. Hence `ipm-steam-helper.exe`, a win-x86 process. It loads the game's
+  own dll rather than shipping one: that copy is Valve's, byte-identical to the
+  `steam_api_o.dll` beside it (both sha1 `e21843f5…`, verified 2026-08-27).
+  The flat API is **`__cdecl`** — a stdcall `DllImport` corrupts the x86 stack.
+- The accessor is `SteamAPI_SteamUGC_v020` today. It carries the interface
+  version, so probe a list of names rather than binding one.
+- Never call `SteamAPI_RestartAppIfNecessary` in the helper — that is the call
+  that would make Steam launch Isaac.
+- **Subscribing does not materialise anything into `mods\`.** Verified
+  2026-08-27: a full subscribe + download left the active profile at exactly its
+  26 folders. Materialisation happens on game launch, which is why an update run
+  refuses while Isaac is running and is otherwise safe.
+- **Unsubscribing deletes the content within seconds.** Verified in the same
+  run: `content\250900\` went back to empty and `WorkshopItemsInstalled` back to
+  `{}`. So the copy into the library must happen *between* the subscribe and the
+  unsubscribe — hence two helper invocations, not one.
+- `GetItemInstallInfo`'s `punTimeStamp` **equals the Workshop's `time_updated`**
+  (both `1787287627` for `3734781489`). That is the revision stamp to record, so
+  the next check compares revisions instead of guessing from the import date.
+- `steam_api.dll` prints a banner (`Setting breakpad minidump AppID`) on
+  **stderr** every run. Do not treat stderr as a failure signal; real failures
+  come back as an `error` event on stdout.
+- **A copy over the top is not an update.** `DirectoryCopier` merges, so files
+  the author deleted upstream would survive and the library's bytes would no
+  longer match a partner's fresh install — the exact desync the library exists
+  to prevent. `UpdateFromContent` moves the old entry to `.backup` and copies
+  fresh instead.
+### Sharing a set
+
+- `GetCollectionDetails/v1` is **keyless too**, and resolves a collection id to
+  its child ids. Verified 2026-08-28 against a live Isaac collection
+  (`3775687336`, 29 children). A non-collection id comes back as `result 9` —
+  report that rather than returning an empty list, which reads as "empty
+  collection" and sends the user the wrong way.
+- **A self-contained share code cannot be short.** A published file id needs
+  ~34 bits, so 40 ids is ~227 base64 chars at optimal packing before a single
+  name or hash. Measured on the reference library: 42 mods = **3,679 chars**
+  with hashes, **1,309** without (entry names dominate, not ids). Roughly 100
+  chars buys 17 ids and nothing else. A Steam collection id is short only
+  because Steam stores the list. Do not promise a short self-contained code.
+- Import must install under **the sender's entry name**, not one derived from
+  the downloaded `metadata.xml`. The share's manifest refers to the sender's
+  names, and a name that drifts leaves the profile pointing at nothing;
+  collision suffixes (`golden-items_3338467278`) are where the two differ.
+- `SharedProfile` gained `WorkshopIds` **additively** — schema stayed at 1, so
+  exports made before it are still readable, they just cannot be fetched.
+
+- There is **no `steam://subscribe` handler**. Enumerated every `steam://` URL in
+  `steamui/` and grepped `steamclient64.dll`, `steam.exe` and `SteamUI.dll`:
+  `SubscribeWorkshopItem` exists as an internal client call, but nothing is
+  exposed to the protocol handler. Subscribing is reachable only through the
+  Steamworks API, the Community web UI, or a collection's "Subscribe to all".
+
 - The workshop item `3127536138` ("REPENTOGON: Isaac Script Extender") is a
   **nag screen, not the build**. Its `main.lua` probes
   `../../../Repentogon/resources-repentogon/gfx/ui/changelog.anm2`; if the real
