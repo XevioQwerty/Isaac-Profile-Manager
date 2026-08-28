@@ -55,6 +55,10 @@ public class LibraryUpdateRunnerTests
             return Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));
         }
 
+        public Task<PullResult> SubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress,
+                                               CancellationToken cancellation = default) =>
+            Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));
+
         public Task<PullResult> UnsubscribeAllAsync(IProgress<string>? progress,
                                                     CancellationToken cancellation = default) =>
             Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));
@@ -139,6 +143,10 @@ public class LibraryUpdateRunnerTests
         public Task<PullResult> UnsubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress,
                                                  CancellationToken cancellation = default) =>
             Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 1));
+
+        public Task<PullResult> SubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress,
+                                               CancellationToken cancellation = default) =>
+            Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));
 
         public Task<PullResult> UnsubscribeAllAsync(IProgress<string>? progress,
                                                     CancellationToken cancellation = default) =>

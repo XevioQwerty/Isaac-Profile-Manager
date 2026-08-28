@@ -52,6 +52,10 @@ public class ShareImportTests
             return Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));
         }
 
+        public Task<PullResult> SubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress,
+                                               CancellationToken cancellation = default) =>
+            Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));
+
         public Task<PullResult> UnsubscribeAllAsync(IProgress<string>? progress,
                                                     CancellationToken cancellation = default) =>
             Task.FromResult(new PullResult(true, Array.Empty<PulledItem>(), Array.Empty<string>(), 0));

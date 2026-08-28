@@ -55,10 +55,11 @@ public static class Program
         {
             "status" => Done(true),
             "pull" => Pull(steam, options),
+            "subscribe" => SubscribeOnly(steam, options),
             "unsubscribe" => Unsubscribe(steam, options.Ids, options),
             "unsubscribe-all" => Unsubscribe(steam, steam.SubscribedItems(), options),
             _ => throw new SteamHelperException(
-                $"Unknown verb '{options.Verb}'. Expected status, pull, unsubscribe or unsubscribe-all."),
+                $"Unknown verb '{options.Verb}'. Expected status, pull, subscribe, unsubscribe or unsubscribe-all."),
         };
     }
 
@@ -205,6 +206,57 @@ public static class Program
         return Done(!incomplete);
     }
 
+    /// <summary>
+    /// Subscribe and stop there, leaving Steam to download in its own time.
+    ///
+    /// The pull verb owns the whole cycle and hands content back for the library;
+    /// this is the escape hatch for when that is not what you want. Whatever is
+    /// subscribed here stays subscribed, so Steam treats these mods normally --
+    /// which also means they will be laid into the active profile on the next
+    /// launch, exactly like any ordinary subscription.
+    /// </summary>
+    private static int SubscribeOnly(SteamUgc steam, Options options)
+    {
+        if (steam.OwnsApp() == false)
+        {
+            Emit("error", new()
+            {
+                ["message"] = "This Steam account does not own The Binding of Isaac: Rebirth, so Steam will not " +
+                              "let it subscribe to Workshop items. Sign in to the account that owns the game.",
+            });
+            return 1;
+        }
+
+        foreach (var id in options.Ids)
+        {
+            steam.Subscribe(id);
+            steam.Download(id);
+            Emit("subscribed", new() { ["id"] = id.ToString() });
+        }
+
+        var settle = Stopwatch.StartNew();
+        while (settle.Elapsed < options.Settle)
+        {
+            steam.RunCallbacks();
+            Thread.Sleep(PollMilliseconds);
+        }
+
+        // Say which ones Steam actually took, so a silent rejection is visible
+        // here rather than as a mod that never appears.
+        var registered = steam.SubscribedItems().ToHashSet();
+        var refused = options.Ids.Where(id => !registered.Contains(id)).ToList();
+
+        foreach (var id in refused)
+            Emit("warning", new()
+            {
+                ["id"] = id.ToString(),
+                ["message"] = "Steam did not register a subscription for this item.",
+            });
+
+        Emit("ready", new() { ["subscribed"] = steam.SubscribedCount() });
+        return Done(refused.Count == 0);
+    }
+
     private static int Unsubscribe(SteamUgc steam, IReadOnlyList<ulong> ids, Options options)
     {
         foreach (var id in ids)
@@ -283,7 +335,7 @@ public static class Program
         {
             if (args.Length == 0)
                 throw new SteamHelperException(
-                    "Usage: ipm-steam-helper <status|pull|unsubscribe|unsubscribe-all> " +
+                    "Usage: ipm-steam-helper <status|pull|subscribe|unsubscribe|unsubscribe-all> " +
                     "--game-dir <path> [--timeout <s>] [--settle <s>] <id>...");
 
             var options = new Options { Verb = args[0].ToLowerInvariant() };

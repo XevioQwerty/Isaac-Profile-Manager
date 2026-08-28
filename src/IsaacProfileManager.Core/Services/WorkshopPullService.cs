@@ -47,6 +47,7 @@ public interface IWorkshopPullService
     Task<PullResult> PullAsync(IReadOnlyList<string> ids, IProgress<string>? progress, CancellationToken cancellation = default);
     Task<PullResult> UnsubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress, CancellationToken cancellation = default);
     Task<PullResult> UnsubscribeAllAsync(IProgress<string>? progress, CancellationToken cancellation = default);
+    Task<PullResult> SubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress, CancellationToken cancellation = default);
 }
 
 /// <summary>
@@ -138,6 +139,15 @@ public sealed class WorkshopPullService : IWorkshopPullService
     public Task<PullResult> UnsubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress,
                                              CancellationToken cancellation = default) =>
         RunAsync(new[] { "unsubscribe", "--settle", "10" }.Concat(ids).ToArray(), progress, cancellation);
+
+    /// <summary>
+    /// Subscribe and leave it that way, letting Steam download in the background
+    /// like any other subscription. The deliberate opposite of
+    /// <see cref="PullAsync"/>, which puts the account back as it found it.
+    /// </summary>
+    public Task<PullResult> SubscribeAsync(IReadOnlyList<string> ids, IProgress<string>? progress,
+                                           CancellationToken cancellation = default) =>
+        RunAsync(new[] { "subscribe", "--settle", "6" }.Concat(ids).ToArray(), progress, cancellation);
 
     /// <summary>
     /// Drop every subscription for the app, with the list taken from Steam
