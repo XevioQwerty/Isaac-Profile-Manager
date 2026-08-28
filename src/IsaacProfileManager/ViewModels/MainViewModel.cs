@@ -208,6 +208,28 @@ public sealed class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ConfigPathText));
     }
 
+    /// <summary>
+    /// Refresh one tab, by its position in the shell. Cheaper than Reload, which
+    /// re-reads the config and every tab.
+    /// </summary>
+    public void RefreshSelectedTab(int index)
+    {
+        if (State != ShellState.Ready) return;
+
+        switch (index)
+        {
+            case 0: ModProfiles.Refresh(); break;
+            case 1: Library.Refresh(); break;
+            case 2: Workshop.Refresh(); break;
+            case 3: BuildVariants.Refresh(); break;
+            case 4: Saves.Refresh(); break;
+            case 5: Debug.Refresh(); break;
+            case 6: Settings.Refresh(); break;
+        }
+
+        RefreshStatusBar();
+    }
+
     public void RefreshStatusBar()
     {
         OnPropertyChanged(nameof(ActiveProfileText));

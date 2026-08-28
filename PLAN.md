@@ -24,6 +24,7 @@
 | 16. Backup retention, log session archiving | **Done** |
 | 17. Workshop update check + resubscribe cycle | **Done** |
 | 18. Bulk unsubscribe, share codes, collection import | **Done** |
+| 19. Steam launch options, unified import, tab refresh | **Done** |
 
 Two conventions worth keeping:
 
@@ -46,6 +47,17 @@ A third convention arrived with step 17:
   item silently publishes nothing on a clean tree, because the file does not
   exist when items are evaluated. `ExcludeFromSingleFile` keeps it a loose exe;
   a 64-bit bundle cannot run a 32-bit payload.
+
+Two conventions from step 19:
+
+- **One version, in `Directory.Build.props`.** The app and the Steam helper ship
+  as a pair and both inherit it; `Package.ps1` refuses to build a release whose
+  executables disagree. A stale helper beside a fresh app is otherwise
+  undetectable from outside.
+- **`Test.ps1` is the pre-release check.** Default runs the build and unit
+  tests; `-Live` also exercises Steam's public API and the 32-bit helper against
+  the real client, read-only. Those two catch what unit tests cannot — an
+  endpoint changing shape, or the helper failing to bind after a game update.
 
 Still not built: live log tail via `FileSystemWatcher`.
 

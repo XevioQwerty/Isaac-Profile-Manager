@@ -33,7 +33,7 @@
         </StackPanel>
 
         <Border Grid.Row="3" Style="{StaticResource Card}">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <ScrollViewer x:Name="PlanScroller" VerticalScrollBarVisibility="Auto">
                 <ItemsControl x:Name="PlanList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
@@ -76,6 +76,10 @@
 
             <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,10"
                        Text="Import resubscribes to the missing mods, takes the files into your library, and unsubscribes again. Steam must be running and Isaac must be closed.&#10;&#10;Just subscribe in Steam does only the first step and leaves them subscribed, so Steam downloads them normally in the background — use it if Import will not fetch. Those mods then behave like any ordinary subscription, including being laid into the active profile when the game launches."/>
+
+            <ProgressBar x:Name="Progress" Height="4" Margin="0,0,0,8" Visibility="Collapsed"
+                         Minimum="0" Maximum="100" Foreground="{StaticResource Accent}"
+                         Background="{StaticResource PanelAlt}" BorderThickness="0"/>
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <TextBlock x:Name="ProgressText" Style="{StaticResource Mono}" VerticalAlignment="Center"

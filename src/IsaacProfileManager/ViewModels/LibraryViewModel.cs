@@ -19,7 +19,11 @@ public sealed class LibraryModViewModel : ObservableObject
 
     public string Entry => Info.Entry;
     public string Name => Info.Name;
-    public string Description => Info.Description;
+    /// <summary>
+    /// Stripped of BBCode. Authors paste their whole Workshop page into
+    /// metadata.xml, so raw this is a wall of [h2] and [url=...] tags.
+    /// </summary>
+    public string Description => BbCode.Strip(Info.Description);
     public string? PreviewPath => Info.PreviewPath;
     public string? WorkshopId => Info.WorkshopId;
     public string Path => Info.Path;
@@ -508,7 +512,14 @@ public sealed class LibraryViewModel : ObservableObject
         var gameDir = _shell.Config?.GameDir;
         if (library is null || string.IsNullOrWhiteSpace(gameDir)) return;
 
-        var window = new Views.ShareImportWindow(library, new WorkshopPullService(gameDir), _shell.Process)
+        var window = new Views.ShareImportWindow(library, new WorkshopPullService(gameDir), _shell.Process,
+            name =>
+                {
+                    var config = _shell.Config;
+                    if (config is null) return;
+                    if (config.Profiles.Contains(name, StringComparer.OrdinalIgnoreCase)) return;
+                    _shell.ModProfileService.Add(config, name);
+                })
         {
             Owner = Application.Current?.MainWindow,
         };

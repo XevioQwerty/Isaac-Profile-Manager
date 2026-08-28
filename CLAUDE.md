@@ -250,6 +250,30 @@ Run the tests before touching anything under `Services/`:
   longer match a partner's fresh install — the exact desync the library exists
   to prevent. `UpdateFromContent` moves the old entry to `.backup` and copies
   fresh instead.
+### Workshop metadata
+
+- **Preview images do not come from the mod.** Most Workshop items ship no
+  thumbnail; the picture is Steam's *store* image, fetched from the CDN via
+  `preview_url` in `GetPublishedFileDetails`. `WorkshopPreviewService` does
+  this. Any code path that fills the library must call it, or the library
+  arrives with a handful of pictures — the share import shipped without it and
+  produced exactly that.
+- **Descriptions are BBCode.** Authors paste their whole store page into
+  `metadata.xml`, so raw they are a wall of `[h2]`, `[b]` and `[url=…]`.
+  `BbCode.Strip` removes them for display. It matches only tags Steam actually
+  defines: matching any bracketed word eats prose like `[probably]` and titles
+  like `[BETA] …`. `[img]…[/img]` must lose its contents too — they are a URL,
+  not a caption — unlike `[url=…]label[/url]`, where the label is the point.
+- **The acf lags an unsubscribe.** Steam deletes an item's content folder
+  immediately but rewrites `appworkshop_250900.acf` a moment later. In that
+  window the acf lists ids whose folders are gone, and with no `metadata.xml`
+  to read they render as bare numbers at 0 MB. Filter on
+  `WorkshopItem.ContentPresent`; the same check also excludes a subscription
+  that has not finished downloading, which cannot be imported either.
+- The acf records items Steam has **installed**, not merely subscribed. "I
+  subscribed and the tab is empty" therefore has two causes it cannot
+  distinguish — ask the helper (`status`) for Steam's own count instead.
+
 ### Sharing a set
 
 - `GetCollectionDetails/v1` is **keyless too**, and resolves a collection id to
@@ -320,6 +344,11 @@ These rules exist because violating them destroys user data:
 - Config holds absolute machine-local paths, so it is gitignored.
 
 ### PowerShell (existing implementation)
+
+- **Never `2>&1` a native exe in a script.** PowerShell 5.1 wraps each stderr
+  line in an ErrorRecord, which `$ErrorActionPreference = 'Stop'` turns into a
+  terminating error. `steam_api.dll` prints a breakpad banner to stderr on every
+  run, so this made `Test.ps1` report the helper as broken when it was fine.
 
 - Don't name variables `$args`, `$Input`, `$Profile`, `$Host` — automatic vars.
 - Use `[Environment]::GetFolderPath('MyDocuments')`, not

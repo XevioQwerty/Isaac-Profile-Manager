@@ -18,16 +18,26 @@ public partial class ShareImportWindow : Window
     private readonly ModLibraryService _library;
     private readonly IWorkshopPullService _pull;
     private readonly IGameProcessService _process;
+    private readonly Action<string>? _registerProfile;
 
     private SharedProfile? _share;
     private SharePlan? _plan;
 
-    public ShareImportWindow(ModLibraryService library, IWorkshopPullService pull, IGameProcessService process)
+    /// <param name="registerProfile">
+    /// Called with the profile's name once it has been built, so it appears in
+    /// the profile list straight away. Without this the import left a folder and
+    /// a manifest that the config knew nothing about, and the Mod profiles tab
+    /// offered it as a stray folder to "Add" — which looks like the import only
+    /// half worked.
+    /// </param>
+    public ShareImportWindow(ModLibraryService library, IWorkshopPullService pull, IGameProcessService process,
+                             Action<string>? registerProfile = null)
     {
         InitializeComponent();
         _library = library;
         _pull = pull;
         _process = process;
+        _registerProfile = registerProfile;
     }
 
     /// <summary>Set when an import actually changed something, so the caller can refresh.</summary>
@@ -195,7 +205,7 @@ public partial class ShareImportWindow : Window
         try
         {
             var runner = new ShareImportRunner(_library, _pull, _process);
-            var progress = new Progress<string>(m => ProgressText.Text = m);
+            var progress = Reporter();
             var report = await runner.RunAsync(_share, _plan, profileName, progress);
 
             Changed = report.AnythingChanged || report.ProfileWritten is not null;
@@ -205,13 +215,25 @@ public partial class ShareImportWindow : Window
                 report.Installed.Count > 0 ? $"Downloaded {report.Installed.Count} mod(s)." : "Nothing needed downloading.",
             };
 
-            if (report.ProfileWritten is not null) lines.Add($"Built the profile '{report.ProfileWritten}'.");
+            if (report.ProfileWritten is not null)
+            {
+                lines.Add($"Built the profile '{report.ProfileWritten}'.");
+
+                try
+                {
+                    _registerProfile?.Invoke(report.ProfileWritten);
+                }
+                catch (Exception ex)
+                {
+                    lines.Add($"The profile was built but could not be added to the list: {ex.Message}");
+                }
+            }
             if (report.Failed.Count > 0) lines.Add($"{report.Failed.Count} failed: {string.Join("; ", report.Failed)}");
             if (report.HashMismatches.Count > 0)
                 lines.Add($"These do not match the sender byte for byte: {string.Join(", ", report.HashMismatches)}");
             lines.AddRange(report.Warnings);
 
-            ProgressText.Text = string.Empty;
+            StopProgress();
             StatusText.Text = lines[0];
 
             MessageBox.Show(string.Join(Environment.NewLine + Environment.NewLine, lines),
@@ -228,7 +250,7 @@ public partial class ShareImportWindow : Window
         }
         catch (Exception ex)
         {
-            ProgressText.Text = string.Empty;
+            StopProgress();
             MessageBox.Show(ex.Message, "Import", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -280,7 +302,7 @@ public partial class ShareImportWindow : Window
 
         try
         {
-            var result = await _pull.SubscribeAsync(ids, new Progress<string>(m => ProgressText.Text = m));
+            var result = await _pull.SubscribeAsync(ids, Reporter());
 
             var lines = new List<string>
             {
@@ -297,7 +319,7 @@ public partial class ShareImportWindow : Window
             lines.AddRange(result.Warnings);
             lines.AddRange(result.Errors);
 
-            ProgressText.Text = string.Empty;
+            StopProgress();
             StatusText.Text = lines[0];
 
             MessageBox.Show(string.Join(Environment.NewLine + Environment.NewLine, lines), "Subscribe in Steam",
@@ -306,7 +328,7 @@ public partial class ShareImportWindow : Window
         }
         catch (Exception ex)
         {
-            ProgressText.Text = string.Empty;
+            StopProgress();
             MessageBox.Show(ex.Message, "Subscribe in Steam", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -314,6 +336,54 @@ public partial class ShareImportWindow : Window
             SubscribeButton.IsEnabled = true;
             ImportButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>
+    /// Show progress as a bar as well as a line of text.
+    ///
+    /// A 400 MB download across 25 mods reported only as one self-overwriting
+    /// line is indistinguishable from a hang, which is how it was reported. The
+    /// helper already emits per-item percentages; this drives the bar from them
+    /// and falls back to indeterminate for the steps that have no percentage.
+    /// </summary>
+    private IProgress<string> Reporter()
+    {
+        Progress.Visibility = Visibility.Visible;
+        Progress.IsIndeterminate = true;
+
+        return new Progress<string>(message =>
+        {
+            ProgressText.Text = message;
+
+            var percent = ParsePercent(message);
+            if (percent is null)
+            {
+                Progress.IsIndeterminate = true;
+                return;
+            }
+
+            Progress.IsIndeterminate = false;
+            Progress.Value = percent.Value;
+        });
+    }
+
+    private void StopProgress()
+    {
+        Progress.Visibility = Visibility.Collapsed;
+        Progress.IsIndeterminate = false;
+        ProgressText.Text = string.Empty;
+    }
+
+    /// <summary>The trailing "NN%" the helper appends while downloading.</summary>
+    private static int? ParsePercent(string message)
+    {
+        var marker = message.LastIndexOf('%');
+        if (marker <= 0) return null;
+
+        var start = marker;
+        while (start > 0 && char.IsDigit(message[start - 1])) start--;
+
+        return start < marker && int.TryParse(message[start..marker], out var value) ? value : null;
     }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();

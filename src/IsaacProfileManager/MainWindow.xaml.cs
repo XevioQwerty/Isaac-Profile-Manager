@@ -32,4 +32,21 @@ public partial class MainWindow : Window
         Activated += (_, _) => _viewModel.RefreshStatusBar();
         Closed += (_, _) => _statusTimer.Stop();
     }
+
+    /// <summary>
+    /// Re-read the tab being switched to.
+    ///
+    /// Every tab reads state that other tabs change — importing on one adds
+    /// library entries another lists, and Steam moves underneath all of them.
+    /// Leaving each tab showing whatever it saw when the window opened meant
+    /// hunting for a Refresh button to see work you had just done.
+    /// </summary>
+    private void OnTabChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        // TabControl bubbles SelectionChanged from any Selector inside a tab —
+        // a list box, a combo box — and those must not trigger a full reload.
+        if (!ReferenceEquals(e.OriginalSource, Tabs)) return;
+
+        _viewModel.RefreshSelectedTab(Tabs.SelectedIndex);
+    }
 }

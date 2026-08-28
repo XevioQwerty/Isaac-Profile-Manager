@@ -249,6 +249,45 @@ public sealed class SetupViewModel : ObservableObject
         _shell.Report(result.Message);
     }
 
+    private bool _importAfterSetup;
+
+    /// <summary>
+    /// Offer to start from someone else's profile.
+    ///
+    /// Asked here because this is the moment a new user has nothing: the
+    /// alternative is finishing setup with an empty library and then having to
+    /// discover that Import exists. Setup still completes normally first — the
+    /// import needs a config to write into.
+    /// </summary>
+    public bool ImportAfterSetup
+    {
+        get => _importAfterSetup;
+        set => SetField(ref _importAfterSetup, value);
+    }
+
+    /// <summary>Open the import dialog once setup has produced a config to import into.</summary>
+    private void OpenImport()
+    {
+        var config = _shell.Config;
+        if (config?.SyncRoot is null) return;
+
+        var window = new Views.ShareImportWindow(
+            new Core.Services.ModLibraryService(_shell.Junctions, config.SyncRoot),
+            new Core.Services.WorkshopPullService(config.GameDir ?? string.Empty),
+            _shell.Process,
+            name =>
+            {
+                if (config.Profiles.Contains(name, StringComparer.OrdinalIgnoreCase)) return;
+                _shell.ModProfileService.Add(config, name);
+            })
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+
+        window.ShowDialog();
+        if (window.Changed) _shell.Reload();
+    }
+
     private async Task RunAsync()
     {
         var plan = BuildPlan();
@@ -283,6 +322,8 @@ public sealed class SetupViewModel : ObservableObject
             _shell.Report($"Set up '{plan.FirstProfile}' — {result.ModsCopied} mod(s) copied in.");
 
             OfferLaunchOptions(plan.LauncherExe);
+
+            if (ImportAfterSetup) OpenImport();
         }
         catch (Exception ex)
         {

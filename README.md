@@ -114,6 +114,17 @@ Anything that is not a Workshop item — a hand-installed mod — travels in the
 as a name so the recipient is told about it, but nothing can download it for
 them. The app says so plainly at both ends.
 
+### Setting up from someone else's profile
+
+If a friend already has the modpack, you do not need to build anything. During
+first-time setup, tick **"I have a share code or profile from someone"**; setup
+finishes normally and then opens the import, which downloads the whole set from
+the Workshop and builds the profile for you.
+
+The same import lives on **Mod profiles → Import...** afterwards. It takes a
+share code, a Steam collection id, or a profile file, and it shows you exactly
+what it will do before it does any of it.
+
 ### Prove you and your friends match
 
 Same folder name with different contents is a real desync cause and it's
@@ -316,6 +327,33 @@ shortcut, so you launch a real program rather than a script — and re-running i
 is how you update after pulling. Add `-DesktopShortcut` for one on the desktop,
 or `-Destination 'D:\Apps\IsaacProfileManager'` to put it wherever you like. No
 administrator needed.
+
+The app ships as **two** executables. `ipm-steam-helper.exe` is 32-bit because
+Isaac ships only a 32-bit `steam_api.dll`, and it is what talks to Steam for
+Workshop updates and share imports. It must sit beside `IsaacProfileManager.exe`;
+`Install.ps1` and `Package.ps1` both put it there, and both are versioned from
+`Directory.Build.props` so they can never disagree about which build they are.
+
+To check a build before releasing it:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\Test.ps1 -Live
+```
+
+Without `-Live` that builds and runs the unit tests. With it, it also exercises
+Steam's public API and the helper against your real Steam client, read-only —
+which is what catches an endpoint changing shape or the helper failing to bind
+after a game update.
+
+To produce a release:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\Package.ps1
+```
+
+That writes a portable zip and an installer to `dist\`. The installer needs
+[Inno Setup 6](https://jrsoftware.org/isinfo.php); without it the zip is still
+built.
 
 To build without installing:
 

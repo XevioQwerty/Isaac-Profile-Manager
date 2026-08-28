@@ -25,6 +25,10 @@
                 <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
                            Text="Copies the mod out of Steam's content store into a folder named without the workshop id, so Steam has no claim on it. Do this while you are still subscribed — descriptions and previews cannot be captured afterwards."/>
                 <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Mono}"/>
+                <ProgressBar Height="4" Margin="0,8,0,0" IsIndeterminate="True"
+                             Foreground="{StaticResource Accent}" Background="{StaticResource PanelAlt}"
+                             BorderThickness="0"
+                             Visibility="{Binding IsWorking, Converter={StaticResource BoolToVisible}}"/>
             </StackPanel>
         </Border>
 
@@ -116,6 +120,8 @@
                     <Button Content="Browse the Workshop" Command="{Binding BrowseWorkshopCommand}" Margin="0,0,8,8"/>
                     <Button Content="My subscribed items" Command="{Binding OpenSubscriptionsCommand}" Margin="0,0,8,8"/>
                     <Button Content="Unsubscribe from everything" Command="{Binding UnsubscribeAllCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Ask Steam what I'm subscribed to" Command="{Binding AskSteamCommand}" Margin="0,0,8,8"/>
+                    <TextBlock Text="{Binding ProgressText}" Style="{StaticResource Mono}" VerticalAlignment="Center" Margin="0,0,0,8"/>
                 </WrapPanel>
 
                 <CheckBox Content="Capture previews and descriptions from Steam during import"

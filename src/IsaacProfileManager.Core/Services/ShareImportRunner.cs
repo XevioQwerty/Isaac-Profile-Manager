@@ -1,3 +1,5 @@
+using System.Net.Http;
+
 namespace IsaacProfileManager.Core.Services;
 
 public enum ShareItemAction
@@ -202,6 +204,40 @@ public sealed class ShareImportRunner
                 if (cleanup.SubscribedAfter > 0)
                     warnings.Add($"Steam still reports {cleanup.SubscribedAfter} subscription(s). " +
                                  "Anything left subscribed will be re-laid into the active profile on launch.");
+            }
+        }
+
+        // Previews come from Steam's CDN, not from the downloaded content: most
+        // items ship no thumbnail, so the store image is the only one there is.
+        // The Workshop import has always fetched them; an import from a code
+        // did not, which is why a shared library arrived with a handful of
+        // pictures instead of all of them.
+        if (installed.Count > 0)
+        {
+            var withIds = installed
+                .Select(entry => (Entry: entry, Id: _library.GetCachedId(entry) ?? string.Empty))
+                .Where(pair => pair.Id.Length > 0)
+                .ToList();
+
+            if (withIds.Count > 0)
+            {
+                progress?.Report("Fetching previews from Steam");
+                try
+                {
+                    var preview = await new WorkshopPreviewService()
+                        .CacheAsync(withIds, _library.MetadataRoot, progress, cancellation)
+                        .ConfigureAwait(false);
+
+                    if (!preview.Succeeded)
+                        warnings.Add($"Previews could not be fetched ({preview.Error}). The mods are fine; " +
+                                     "re-run the import later to pick the images up.");
+                    else
+                        progress?.Report($"Previews: {preview.Fetched} fetched, {preview.Unavailable} unavailable");
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    warnings.Add($"Previews could not be fetched ({ex.Message}). The mods are fine.");
+                }
             }
         }
 

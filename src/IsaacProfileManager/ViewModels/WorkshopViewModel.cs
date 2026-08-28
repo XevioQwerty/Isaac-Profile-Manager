@@ -19,7 +19,7 @@ public sealed class WorkshopItemViewModel : ObservableObject
 
     public string Name => Item.Name;
     public string Id => Item.Id;
-    public string Description => Item.Description;
+    public string Description => BbCode.Strip(Item.Description);
     public string SizeText => $"{Item.SizeMb} MB";
     public string MaterialisedFolderName => Item.MaterialisedFolderName;
     public string StatusText => InLibrary ? "in library" : "not imported";
@@ -67,9 +67,108 @@ public sealed class WorkshopViewModel : ObservableObject
         OpenContentFolderCommand = new RelayCommand(OpenContentFolder, () => ContentRoot is not null);
 
         UnsubscribeAllCommand = new RelayCommand(async () => await UnsubscribeAllAsync(), () => !_shell.IsBusy);
+        AskSteamCommand = new RelayCommand(async () => await AskSteamAsync(), () => !_shell.IsBusy);
     }
 
     public RelayCommand UnsubscribeAllCommand { get; }
+    public RelayCommand AskSteamCommand { get; }
+
+    /// <summary>
+    /// Ask Steam directly how many Workshop items this account is subscribed to.
+    ///
+    /// This list is otherwise read from appworkshop_250900.acf, which records
+    /// items Steam has *installed*. A fresh subscription that has not finished
+    /// downloading is not in there yet, so "I subscribed and the tab is empty"
+    /// has two very different causes and the acf cannot tell them apart.
+    /// </summary>
+    private async Task AskSteamAsync()
+    {
+        var gameDir = _shell.Config?.GameDir;
+        if (string.IsNullOrWhiteSpace(gameDir)) return;
+
+        var pull = new WorkshopPullService(gameDir);
+        if (!pull.IsAvailable)
+        {
+            MessageBox.Show(WorkshopPullService.NotFoundMessage(), "Ask Steam",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        _shell.IsBusy = true;
+        IsWorking = true;
+        ProgressText = "Asking Steam...";
+
+        try
+        {
+            var result = await pull.StatusAsync();
+
+            var root = !string.IsNullOrWhiteSpace(_shell.Config!.WorkshopRoot)
+                ? _shell.Config.WorkshopRoot
+                : WorkshopService.ResolveWorkshopRoot(gameDir);
+            var acf = root is null ? "(workshop folder not found)" : new WorkshopService(root).AcfPath ?? "(none)";
+
+            var lines = new List<string>
+            {
+                $"Steam says this account is subscribed to {result.SubscribedAfter} Isaac Workshop item(s).",
+                $"Owns the game: {Describe(result.OwnsApp)}    Signed in: {Describe(result.LoggedOn)}",
+                string.Empty,
+                $"This tab reads Steam's installed-items record:{Environment.NewLine}{acf}",
+                $"It currently lists {Items.Count} item(s).",
+            };
+
+            if (result.SubscribedAfter > 0 && Items.Count == 0)
+                lines.Add(Environment.NewLine +
+                          "Subscribed but not listed means Steam has not finished downloading them yet. " +
+                          "Let it finish, then press Refresh.");
+
+            foreach (var error in result.Errors) lines.Add(error);
+
+            MessageBox.Show(string.Join(Environment.NewLine, lines), "Ask Steam",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Ask Steam", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            ProgressText = string.Empty;
+            IsWorking = false;
+            _shell.IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Poll until Steam's record stops listing what we just dropped, or we run
+    /// out of patience. Bounded, because a stale list is a cosmetic problem and
+    /// blocking the UI on Steam would be a real one.
+    /// </summary>
+    private async Task WaitForAcfAsync(int expectedRemoved)
+    {
+        if (expectedRemoved == 0) return;
+
+        var config = _shell.Config;
+        var root = !string.IsNullOrWhiteSpace(config?.WorkshopRoot)
+            ? config!.WorkshopRoot
+            : WorkshopService.ResolveWorkshopRoot(config?.GameDir);
+        if (root is null) return;
+
+        var workshop = new WorkshopService(root);
+        var before = workshop.GetSubscribedIds().Count;
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            await Task.Delay(500);
+            if (workshop.GetSubscribedIds().Count < before) return;
+        }
+    }
+
+    private static string Describe(bool? flag) => flag switch
+    {
+        true => "yes",
+        false => "NO",
+        _ => "unknown",
+    };
 
     /// <summary>
     /// Drop every Workshop subscription for Isaac in one go.
@@ -84,6 +183,15 @@ public sealed class WorkshopViewModel : ObservableObject
     /// deleting a user's mods as a side effect of a Steam operation would be a
     /// surprise, so that stays a separate, deliberate action.
     /// </summary>
+    private bool _isWorking;
+
+    /// <summary>Drives the progress bar; long Steam operations look like a hang without it.</summary>
+    public bool IsWorking
+    {
+        get => _isWorking;
+        private set => SetField(ref _isWorking, value);
+    }
+
     private async Task UnsubscribeAllAsync()
     {
         var gameDir = _shell.Config?.GameDir;
@@ -114,6 +222,7 @@ public sealed class WorkshopViewModel : ObservableObject
         if (confirm != MessageBoxResult.OK) return;
 
         _shell.IsBusy = true;
+        IsWorking = true;
         ProgressText = "Asking Steam what you are subscribed to...";
 
         try
@@ -130,6 +239,13 @@ public sealed class WorkshopViewModel : ObservableObject
             foreach (var error in result.Errors) message += $" {error}";
 
             _shell.Report(message);
+
+            // Steam rewrites appworkshop_250900.acf a moment after the
+            // unsubscribe lands. Re-reading immediately shows what was just
+            // removed, which reads as the button not having worked.
+            ProgressText = "Waiting for Steam to update its record...";
+            await WaitForAcfAsync(result.Unsubscribed.Count);
+
             MessageBox.Show(message, "Unsubscribe from everything", MessageBoxButton.OK, MessageBoxImage.Information);
             Refresh();
         }
@@ -141,6 +257,7 @@ public sealed class WorkshopViewModel : ObservableObject
         finally
         {
             ProgressText = string.Empty;
+            IsWorking = false;
             _shell.IsBusy = false;
         }
     }
@@ -272,8 +389,19 @@ public sealed class WorkshopViewModel : ObservableObject
         }
 
         var entries = library.ListEntries().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var all = workshop.GetItems();
 
-        foreach (var item in workshop.GetItems().OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase))
+        // Steam deletes an item's content the moment you unsubscribe, but takes
+        // a little longer to rewrite the acf. In that window the acf still lists
+        // ids whose folders are gone, and those have no metadata.xml to read a
+        // name from — which is why unsubscribing briefly produced a list of bare
+        // numbers reading "0 MB, not imported". They are also the state of a
+        // subscription Steam has not finished downloading yet. Neither can be
+        // imported, so neither belongs in the list.
+        var pending = all.Count(i => !i.ContentPresent);
+
+        foreach (var item in all.Where(i => i.ContentPresent)
+                                .OrderBy(i => i.Name, StringComparer.OrdinalIgnoreCase))
         {
             var entry = library.ResolveEntryName(item);
             var inLibrary = entries.Contains(entry);
@@ -293,6 +421,9 @@ public sealed class WorkshopViewModel : ObservableObject
         SummaryText =
             $"{Items.Count} subscribed  ·  {imported} already in the library  ·  " +
             $"{withPreview} with a preview  ·  {Items.Sum(i => i.Item.SizeMb):N0} MB total";
+
+        if (pending > 0)
+            SummaryText += $"  ·  {pending} subscribed but not on disk yet (downloading, or just unsubscribed)";
 
         SelectedItem = Items.FirstOrDefault(i => i.Id == previouslySelected) ?? Items.FirstOrDefault();
         OnPropertyChanged(nameof(HasItems));

@@ -116,7 +116,14 @@ public sealed class ModProfilesViewModel : ObservableObject
             var window = new Views.ShareImportWindow(
                 new ModLibraryService(_shell.Junctions, syncRoot),
                 new WorkshopPullService(gameDir ?? string.Empty),
-                _shell.Process)
+                _shell.Process,
+                name =>
+                {
+                    var config = _shell.Config;
+                    if (config is null) return;
+                    if (config.Profiles.Contains(name, StringComparer.OrdinalIgnoreCase)) return;
+                    _shell.ModProfileService.Add(config, name);
+                })
             {
                 Owner = System.Windows.Application.Current?.MainWindow,
             };
