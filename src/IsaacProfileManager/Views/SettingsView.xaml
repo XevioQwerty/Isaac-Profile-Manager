@@ -91,6 +91,10 @@
                             <TextBlock Text="{Binding LaunchOptionsCurrent}" Style="{StaticResource Mono}" Margin="0,0,0,6"/>
                             <TextBlock Text="Should be" Style="{StaticResource Dim}"/>
                             <TextBlock Text="{Binding LaunchOptionsSuggested}" Style="{StaticResource Mono}" Margin="0,0,0,8"/>
+                            <Button Content="Set it in Steam for me" Command="{Binding ApplyLaunchOptionsCommand}"
+                                    Style="{StaticResource PrimaryButton}" Margin="0,0,0,8"/>
+                            <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                       Text="Writes it straight into Steam's config. Steam must be closed first — it keeps that file in memory and rewrites it on exit, so a change made while it is running would be thrown away. Your existing config is backed up first."/>
                             <Button Content="Copy the correct line" Command="{Binding CopyLaunchOptionsCommand}"
                                     HorizontalAlignment="Left"/>
                         </StackPanel>

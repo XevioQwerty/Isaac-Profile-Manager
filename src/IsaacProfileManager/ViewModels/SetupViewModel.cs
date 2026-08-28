@@ -201,6 +201,54 @@ public sealed class SetupViewModel : ObservableObject
         if (dialog.ShowDialog() == true) LauncherExe = dialog.FileName;
     }
 
+    /// <summary>
+    /// Offer to set Steam's launch options as the last step of setup.
+    ///
+    /// Without the launcher line Steam starts the game directly, so
+    /// <c>[Shared] LaunchMode</c> is never read and per-profile build selection
+    /// silently does nothing — a setup mistake that presents much later as
+    /// "switching the build didn't work". Asking here is the one moment the
+    /// user is already thinking about configuration.
+    ///
+    /// It is an offer, not an automatic write: it edits a file Steam owns, and
+    /// Steam has to be closed for the change to survive.
+    /// </summary>
+    private void OfferLaunchOptions(string? launcherExe)
+    {
+        if (string.IsNullOrWhiteSpace(launcherExe)) return;
+
+        var service = new Core.Services.SteamLaunchOptionsService();
+        if (service.Check(launcherExe).IsCorrect) return;
+
+        var line = Core.Services.SteamLaunchOptionsService.Suggest(launcherExe);
+
+        var answer = MessageBox.Show(
+            "Set Steam's launch options for Isaac now?" + Environment.NewLine + Environment.NewLine +
+            line + Environment.NewLine + Environment.NewLine +
+            "Without this, Steam starts the game directly and the REPENTOGON build never follows the profile." +
+            Environment.NewLine + Environment.NewLine +
+            "Steam must be closed — it rewrites its config on exit, so a change made while it is running is lost. " +
+            "Your existing config is backed up first.",
+            "Steam launch options", MessageBoxButton.YesNo, MessageBoxImage.Question);
+
+        if (answer != MessageBoxResult.Yes) return;
+
+        var result = service.Apply(launcherExe);
+
+        var message = result.Message;
+        if (result.BackupPath is not null)
+            message += Environment.NewLine + Environment.NewLine + $"Backed up to:{Environment.NewLine}{result.BackupPath}";
+        if (!result.Ok)
+            message += Environment.NewLine + Environment.NewLine +
+                       "You can do it later from the Settings tab, or paste it into Steam yourself: " +
+                       "right-click Isaac, Properties, Launch Options.";
+
+        MessageBox.Show(message, "Steam launch options", MessageBoxButton.OK,
+                        result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+
+        _shell.Report(result.Message);
+    }
+
     private async Task RunAsync()
     {
         var plan = BuildPlan();
@@ -233,6 +281,8 @@ public sealed class SetupViewModel : ObservableObject
 
             _shell.Reload();
             _shell.Report($"Set up '{plan.FirstProfile}' — {result.ModsCopied} mod(s) copied in.");
+
+            OfferLaunchOptions(plan.LauncherExe);
         }
         catch (Exception ex)
         {

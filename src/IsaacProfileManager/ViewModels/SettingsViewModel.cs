@@ -222,6 +222,36 @@ public sealed class SettingsViewModel : ObservableObject
         () => LaunchOptions?.Suggested is not null);
 
     /// <summary>
+    /// Write the launch options into Steam's config rather than making the user
+    /// paste them into a dialog.
+    ///
+    /// Steam must be closed: it holds localconfig.vdf in memory and rewrites it
+    /// on exit, so a write while it runs is silently discarded. The service
+    /// refuses in that case rather than reporting a success that will evaporate.
+    /// </summary>
+    public RelayCommand ApplyLaunchOptionsCommand => new(
+        () =>
+        {
+            var launcher = _shell.Config?.LauncherExe;
+            if (string.IsNullOrWhiteSpace(launcher)) return;
+
+            var result = new Core.Services.SteamLaunchOptionsService().Apply(launcher);
+
+            var message = result.Message;
+            if (result.BackupPath is not null)
+                message += Environment.NewLine + Environment.NewLine +
+                           $"Steam's previous config was backed up to:{Environment.NewLine}{result.BackupPath}";
+
+            _shell.Report(result.Message);
+            System.Windows.MessageBox.Show(message, "Steam launch options",
+                                           System.Windows.MessageBoxButton.OK,
+                                           result.Ok ? System.Windows.MessageBoxImage.Information
+                                                     : System.Windows.MessageBoxImage.Warning);
+            Refresh();
+        },
+        () => _shell.Config?.LauncherExe is { Length: > 0 });
+
+    /// <summary>
     /// When on, activating a profile also writes [Shared] LaunchMode so the build
     /// follows the profile. Requires Steam to launch the launcher rather than the
     /// game — see the README's launch-options section.
