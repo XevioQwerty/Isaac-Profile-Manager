@@ -220,7 +220,8 @@ public sealed class SetupViewModel : ObservableObject
         try
         {
             // Beside the executable, which is where the PowerShell script looks too.
-            var configPath = Path.Combine(AppContext.BaseDirectory, ConfigStore.FileName);
+            // Beside the exe, not the bundle's extraction folder.
+            var configPath = Path.Combine(Core.AppPaths.ExecutableDirectory, ConfigStore.FileName);
             var result = await Task.Run(() => new SetupService(_shell.Junctions).Run(plan, configPath, progress));
 
             _shell.Store.UseConfigAt(result.ConfigPath);

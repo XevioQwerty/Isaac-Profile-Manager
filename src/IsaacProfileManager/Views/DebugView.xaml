@@ -17,6 +17,7 @@
                 <TextBlock Style="{StaticResource Dim}"
                            Text="Isaac writes log.txt when it starts, and truncates it on each launch. Run the game once and come back."/>
                 <TextBlock Text="{Binding LogPath}" Style="{StaticResource Mono}" Margin="0,8,0,0"/>
+                <TextBlock Text="{Binding HelperDiagnosticText}" Style="{StaticResource Mono}" Margin="0,8,0,0"/>
             </StackPanel>
         </Border>
 

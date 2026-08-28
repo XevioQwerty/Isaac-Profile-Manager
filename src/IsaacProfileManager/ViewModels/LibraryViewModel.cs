@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Data;
 using IsaacProfileManager.Core.Services;
@@ -40,6 +41,28 @@ public sealed class LibraryModViewModel : ObservableObject
     public string OriginText => Info.HasWorkshopOrigin ? $"Workshop {Info.WorkshopId}" : "local mod";
 
     public bool IsOrphan => UsedBy.Count == 0;
+
+    private LibraryUpdateStatus? _update;
+
+    /// <summary>What the last update check said, if one has run.</summary>
+    public LibraryUpdateStatus? Update
+    {
+        get => _update;
+        set
+        {
+            if (!SetField(ref _update, value)) return;
+            OnPropertyChanged(nameof(HasUpdate));
+            OnPropertyChanged(nameof(UpdateText));
+        }
+    }
+
+    public bool HasUpdate => Update?.NeedsUpdate == true;
+
+    public string UpdateText => Update is null
+        ? string.Empty
+        : Update.BaselineIsImportDate && Update.State == UpdateState.UpToDate
+            ? "up to date (judged from the import date)"
+            : Update.Summary;
 }
 
 /// <summary>
@@ -77,7 +100,25 @@ public sealed class LibraryViewModel : ObservableObject
         VerifyCommand = new RelayCommand(async () => await HashAsync(verifyOnly: true), () => HasLibrary && !_shell.IsBusy);
         ExportProfileCommand = new RelayCommand(ExportProfile, () => TargetProfile is not null);
         CompareCommand = new RelayCommand(CompareWithExport, () => TargetProfile is not null);
+
+        ShareProfileCommand = new RelayCommand(() => CopyShareCode(wholeLibrary: false), () => TargetProfile is not null);
+        ShareLibraryCommand = new RelayCommand(() => CopyShareCode(wholeLibrary: true), () => HasLibrary);
+        ImportShareCommand = new RelayCommand(ImportShare, () => _shell.Config?.SyncRoot is not null && !_shell.IsBusy);
+
+        CheckUpdatesCommand = new RelayCommand(async () => await CheckUpdatesAsync(), () => HasLibrary && !_shell.IsBusy);
+        UpdateStaleCommand = new RelayCommand(async () => await UpdateAsync(StaleEntries()), () => HasStale && !_shell.IsBusy);
+        UpdateSelectedCommand = new RelayCommand(
+            async () => await UpdateAsync(Selected is null ? Array.Empty<string>() : new[] { Selected.Entry }),
+            () => Selected is { HasUpdate: true } && !_shell.IsBusy);
     }
+
+    public RelayCommand ShareProfileCommand { get; }
+    public RelayCommand ShareLibraryCommand { get; }
+    public RelayCommand ImportShareCommand { get; }
+
+    public RelayCommand CheckUpdatesCommand { get; }
+    public RelayCommand UpdateStaleCommand { get; }
+    public RelayCommand UpdateSelectedCommand { get; }
 
     public RelayCommand RecordHashesCommand { get; }
     public RelayCommand VerifyCommand { get; }
@@ -148,6 +189,336 @@ public sealed class LibraryViewModel : ObservableObject
             _shell.IsBusy = false;
             OnPropertyChanged(nameof(HasReport));
         }
+    }
+
+    // --- Workshop updates --------------------------------------------------
+
+    private string _updateProgress = string.Empty;
+    private string _updateSummary = string.Empty;
+
+    public string UpdateProgress
+    {
+        get => _updateProgress;
+        private set => SetField(ref _updateProgress, value);
+    }
+
+    /// <summary>The one-line verdict from the last check.</summary>
+    public string UpdateSummary
+    {
+        get => _updateSummary;
+        private set => SetField(ref _updateSummary, value);
+    }
+
+    public bool HasStale => Mods.Any(m => m.HasUpdate);
+
+    /// <summary>
+    /// The last check's answers, kept so rebuilding the list after an update
+    /// does not lose the markers on the mods that were not part of it.
+    /// </summary>
+    private IReadOnlyList<LibraryUpdateStatus> _statuses = Array.Empty<LibraryUpdateStatus>();
+
+    private void ApplyStatuses()
+    {
+        var byEntry = _statuses.ToDictionary(st => st.Entry, StringComparer.OrdinalIgnoreCase);
+        foreach (var mod in Mods) mod.Update = byEntry.GetValueOrDefault(mod.Entry);
+        OnPropertyChanged(nameof(HasStale));
+    }
+
+    private string[] StaleEntries() => Mods.Where(m => m.HasUpdate).Select(m => m.Entry).ToArray();
+
+    /// <summary>
+    /// Ask the Workshop which library mods have moved on.
+    ///
+    /// This needs no subscription, so it never disturbs Steam's view of what
+    /// belongs in a profile. That is what makes it safe to run often, and what
+    /// keeps the resubscribe step narrow when it does run.
+    /// </summary>
+    /// <summary>
+    /// Re-read the library's state against the Workshop and apply it.
+    ///
+    /// Always a fresh lookup, never a patched-up copy of the last one. Inferring
+    /// "these are current now" after an update is what left the tab claiming
+    /// mods were stale when the metadata on disk already said otherwise.
+    /// </summary>
+    private async Task<IReadOnlyList<LibraryUpdateStatus>?> FetchStatusesAsync()
+    {
+        var library = Library;
+        if (library is null) return null;
+
+        using var checker = new WorkshopUpdateService();
+        var service = new LibraryUpdateService(library, checker);
+        var progress = new Progress<string>(e => UpdateProgress = e);
+
+        var statuses = await service.CheckAsync(progress: progress);
+
+        _statuses = statuses;
+        ApplyStatuses();
+        UpdateSummary = Describe(statuses);
+        return statuses;
+    }
+
+    private static string Describe(IReadOnlyList<LibraryUpdateStatus> statuses)
+    {
+        var stale = statuses.Count(st => st.NeedsUpdate);
+        var gone = statuses.Count(st => st.State == UpdateState.Unavailable);
+
+        var summary = stale == 0
+            ? "Everything from the Workshop is current."
+            : $"{stale} of {statuses.Count} mods have a newer version on the Workshop.";
+
+        return gone > 0 ? summary + $"  ·  {gone} no longer on the Workshop" : summary;
+    }
+
+    private async Task CheckUpdatesAsync()
+    {
+        var library = Library;
+        if (library is null) return;
+
+        _shell.IsBusy = true;
+        UpdateProgress = "Asking Steam what has changed...";
+
+        try
+        {
+            var statuses = await FetchStatusesAsync();
+            if (statuses is null) return;
+
+            var stale = statuses.Count(st => st.NeedsUpdate);
+            var guessed = statuses.Count(st => st.BaselineIsImportDate);
+
+            Report.Clear();
+            ReportTitle = UpdateSummary;
+            foreach (var st in statuses.Where(x => x.NeedsUpdate).OrderByDescending(x => x.UpstreamUpdatedUtc))
+                Report.Add($"UPDATE    {st.Entry}  —  changed {st.UpstreamUpdatedUtc:yyyy-MM-dd}");
+            foreach (var st in statuses.Where(x => x.State == UpdateState.Unavailable))
+                Report.Add($"GONE      {st.Entry}  —  Steam no longer returns this item");
+
+            // Entries imported before revisions were recorded are judged against
+            // their import date, which can miss an update that landed between
+            // Steam downloading the content and the import happening. One update
+            // run per entry fixes that permanently, so say it once.
+            if (guessed > 0)
+                Report.Add($"note      {guessed} entries were judged from their import date, not a recorded revision");
+
+            if (Report.Count == 0) Report.Add("Nothing to do.");
+            _shell.Report(UpdateSummary);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            UpdateSummary = "Could not reach Steam's Workshop API.";
+            _shell.Report($"{UpdateSummary} {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Check for updates", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            UpdateProgress = string.Empty;
+            _shell.IsBusy = false;
+            OnPropertyChanged(nameof(HasReport));
+            OnPropertyChanged(nameof(HasStale));
+        }
+    }
+
+    /// <summary>
+    /// Resubscribe to the chosen mods, take the new content, and unsubscribe.
+    ///
+    /// Confirmed first because it touches the user's Steam account, and because
+    /// the consequence lands on everyone they play with: updated mods have new
+    /// hashes, and a co-op partner still on the old bytes will desync.
+    /// </summary>
+    private async Task UpdateAsync(IReadOnlyList<string> entries)
+    {
+        var library = Library;
+        var gameDir = _shell.Config?.GameDir;
+        if (library is null || entries.Count == 0) return;
+
+        if (string.IsNullOrWhiteSpace(gameDir))
+        {
+            MessageBox.Show("No game directory in the config, so Steam's API cannot be reached.",
+                            "Update mods", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var pull = new WorkshopPullService(gameDir);
+        if (!pull.IsAvailable)
+        {
+            MessageBox.Show(WorkshopPullService.NotFoundMessage(),
+                            "Update mods", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var names = string.Join(Environment.NewLine + "  ", entries.Take(12));
+        var more = entries.Count > 12
+            ? Environment.NewLine + $"  ...and {entries.Count - 12} more"
+            : string.Empty;
+
+        var confirm = MessageBox.Show(
+            $"Resubscribe to {entries.Count} Workshop mod(s), download the new versions into the library, " +
+            "then unsubscribe again?" + Environment.NewLine + Environment.NewLine +
+            "  " + names + more + Environment.NewLine + Environment.NewLine +
+            "Steam must be running and Isaac must be closed. The old copies are kept in .backup." +
+            Environment.NewLine + Environment.NewLine +
+            "Everyone you play with needs the same update afterwards, or you will desync.",
+            "Update from the Workshop", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+        if (confirm != MessageBoxResult.OK) return;
+
+        _shell.IsBusy = true;
+        UpdateProgress = "Starting...";
+
+        try
+        {
+            var runner = new LibraryUpdateRunner(library, pull, _shell.Process);
+            var progress = new Progress<string>(e => UpdateProgress = e);
+            var report = await runner.RunAsync(entries, progress);
+
+            if (report.AnythingChanged)
+            {
+                // Hashes on record now describe the previous bytes. Leaving them
+                // would make a verify report every updated mod as tampered with.
+                // Done before the report is written because hashing writes its
+                // own, and the update's is the one worth keeping on screen.
+                Refresh();
+                await HashAsync(verifyOnly: false);
+
+                // Ask Steam again rather than assuming the run made these
+                // current. The recorded revisions are on disk now, so a fresh
+                // lookup is the only answer that cannot drift from them.
+                UpdateProgress = "Re-checking...";
+                try
+                {
+                    await FetchStatusesAsync();
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    // The update itself succeeded; a failed re-check only costs
+                    // the markers, so do not present it as an update failure.
+                    UpdateSummary = "Updated. Could not re-check afterwards — press Check for updates.";
+                }
+            }
+
+            Report.Clear();
+            foreach (var entry in report.Updated) Report.Add($"updated   {entry}");
+            foreach (var failure in report.Failed) Report.Add($"FAILED    {failure}");
+            foreach (var warning in report.Warnings) Report.Add($"note      {warning}");
+            if (report.Backups.Count > 0)
+                Report.Add($"backup    the previous copies are in {library.BackupRoot}");
+            if (report.AnythingChanged)
+                Report.Add("hashes    re-recorded, so an export now describes the updated files");
+
+            ReportTitle = report.AnythingChanged
+                ? $"Updated {report.Updated.Count} mod(s)" +
+                  (report.Failed.Count > 0 ? $", {report.Failed.Count} failed" : string.Empty)
+                : "Nothing was updated.";
+
+            _shell.Report(ReportTitle);
+        }
+        catch (Exception ex)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Update mods", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            UpdateProgress = string.Empty;
+            _shell.IsBusy = false;
+            OnPropertyChanged(nameof(HasReport));
+            OnPropertyChanged(nameof(HasStale));
+        }
+    }
+
+    // --- Share codes -------------------------------------------------------
+
+    /// <summary>
+    /// Put a whole mod set on the clipboard as one string.
+    ///
+    /// The code carries Workshop ids, entry names and hashes, so the recipient
+    /// can fetch the set and prove their copy matches. It cannot be short: ids
+    /// are essentially random 34-bit numbers and hashes are incompressible, so
+    /// 40 mods lands around 3.5 KB. A Steam collection id is the short
+    /// alternative, and it is short only because Steam stores the list.
+    /// </summary>
+    private void CopyShareCode(bool wholeLibrary)
+    {
+        var library = Library;
+        if (library is null) return;
+
+        try
+        {
+            var hashes = new LibraryHashService(library);
+            var profile = wholeLibrary
+                ? hashes.ExportLibrary("library")
+                : hashes.Export(TargetProfile!, library.LoadManifest(TargetProfile!));
+
+            if (profile.Mods.Count == 0)
+            {
+                MessageBox.Show("There is nothing to share — that set has no mods in it.",
+                                "Share code", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var code = ShareCodeService.Encode(profile);
+
+            try
+            {
+                Clipboard.SetText(code);
+            }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                MessageBox.Show("Another program is holding the clipboard. Try again in a moment.",
+                                "Share code", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var unhashed = profile.Mods.Count - profile.Hashes.Count;
+            var unfetchable = profile.Mods.Count - profile.WorkshopIds.Count;
+
+            var message =
+                $"Copied a share code for {profile.Mods.Count} mods ({code.Length:N0} characters)." +
+                Environment.NewLine + Environment.NewLine +
+                "Paste it to whoever you play with. They paste it into Import and the app downloads the set for them.";
+
+            // Both of these silently weaken what the recipient gets, so say so
+            // now rather than letting them find out at the far end.
+            if (unhashed > 0)
+                message += Environment.NewLine + Environment.NewLine +
+                           $"{unhashed} mod(s) have no recorded hash, so those cannot be verified. " +
+                           "Press Record hashes first if that matters.";
+
+            if (unfetchable > 0)
+                message += Environment.NewLine + Environment.NewLine +
+                           $"{unfetchable} mod(s) are not Workshop items, so nothing can download those for them. " +
+                           "You will have to send those folders yourself.";
+
+            _shell.Report($"Copied a {code.Length:N0} character share code for {profile.Mods.Count} mods.");
+            MessageBox.Show(message, "Share code", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Share code", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ImportShare()
+    {
+        var library = Library;
+        var gameDir = _shell.Config?.GameDir;
+        if (library is null || string.IsNullOrWhiteSpace(gameDir)) return;
+
+        var window = new Views.ShareImportWindow(library, new WorkshopPullService(gameDir), _shell.Process)
+        {
+            Owner = Application.Current?.MainWindow,
+        };
+
+        window.ShowDialog();
+
+        if (!window.Changed) return;
+
+        _shell.Report("Imported a shared mod set.");
+        Refresh();
     }
 
     /// <summary>Write a profile plus its hashes to one small file to send someone.</summary>
@@ -357,6 +728,11 @@ public sealed class LibraryViewModel : ObservableObject
         LoadTicks();
 
         Selected = Mods.FirstOrDefault(m => m.Entry == previous) ?? Mods.FirstOrDefault();
+
+        // Refresh rebuilds every row, so without this a tab switch quietly drops
+        // the update markers while the summary line above them stayed behind.
+        ApplyStatuses();
+
         View.Refresh();
         RaiseHeader();
     }

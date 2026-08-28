@@ -82,6 +82,20 @@
                                                Visibility="{Binding SubtitleText, Converter={StaticResource StringToVisible}}"/>
                                     <TextBlock Text="{Binding UsedByText}" Style="{StaticResource Dim}"
                                                TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,2,0,0"/>
+                                    <TextBlock Text="{Binding UpdateText}"
+                                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="0,2,0,0"
+                                               Visibility="{Binding UpdateText, Converter={StaticResource StringToVisible}}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource Mono}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasUpdate}" Value="True">
+                                                        <Setter Property="Foreground" Value="#E8B54A"/>
+                                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
                             </Grid>
                         </DataTemplate>
@@ -148,6 +162,32 @@
                     <Button Content="Open library folder" Command="{Binding OpenLibraryCommand}" Margin="0,0,12,8"/>
                     <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,0,8"/>
                 </WrapPanel>
+
+                <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
+
+                <TextBlock Text="Sending a set to someone" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
+                <WrapPanel>
+                    <Button Content="Copy a code for this profile" Command="{Binding ShareProfileCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Copy a code for the whole library" Command="{Binding ShareLibraryCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Import a code..." Command="{Binding ImportShareCommand}" Margin="0,0,8,8"/>
+                </WrapPanel>
+                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8" TextWrapping="Wrap"
+                           Text="A share code is one string holding the Workshop ids, names and hashes for a set. Whoever you send it to pastes it into Import and the app downloads the whole set for them — no folder to copy. It is a few thousand characters, so send it as a message or a file rather than reading it out. Import also accepts a Steam collection id, which is short but carries no hashes."/>
+
+                <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
+
+                <TextBlock Text="Keeping up with the Workshop" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
+                <WrapPanel>
+                    <Button Content="Check for updates" Command="{Binding CheckUpdatesCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Update everything stale" Command="{Binding UpdateStaleCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Update the selected mod" Command="{Binding UpdateSelectedCommand}" Margin="0,0,8,8"/>
+                    <TextBlock Text="{Binding UpdateProgress}" Style="{StaticResource Mono}"
+                               VerticalAlignment="Center" Margin="0,0,0,8"/>
+                </WrapPanel>
+                <TextBlock Text="{Binding UpdateSummary}" Margin="0,0,0,6"
+                           Visibility="{Binding UpdateSummary, Converter={StaticResource StringToVisible}}"/>
+                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8" TextWrapping="Wrap"
+                           Text="Library mods are detached from Steam, so they never receive updates on their own. Checking costs nothing and needs no subscription. Updating resubscribes to just the mods that changed, takes the new files, and unsubscribes again — Steam must be running and Isaac must be closed."/>
 
                 <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
 

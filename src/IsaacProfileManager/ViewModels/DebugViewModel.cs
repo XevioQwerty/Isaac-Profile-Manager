@@ -163,6 +163,33 @@ public sealed class DebugViewModel : ObservableObject
     public bool Exists => _reader.Exists;
     public string LogPath => _reader.LogPath;
 
+    /// <summary>
+    /// Where the app is running from and whether it can see the Steam helper.
+    /// On the Debug tab because "the helper is missing" is unfalsifiable from
+    /// the outside — this makes it a fact the user can read and send back.
+    /// </summary>
+    public string HelperDiagnosticText
+    {
+        get
+        {
+            var pull = new WorkshopPullService(_shell.Config?.GameDir ?? string.Empty);
+
+            var lines = new List<string>
+            {
+                $"app folder      {Core.AppPaths.ExecutableDirectory}",
+                $"bundle folder   {AppContext.BaseDirectory}",
+                $"steam helper    {(pull.IsAvailable ? "found" : "NOT FOUND")}",
+            };
+
+            if (pull.IsAvailable)
+                lines.Add($"                {pull.HelperPath}");
+            else
+                lines.AddRange(WorkshopPullService.ProbedPaths().Take(4).Select(path => $"  looked in   {path}"));
+
+            return string.Join(Environment.NewLine, lines);
+        }
+    }
+
     public LogSummary? Summary
     {
         get => _summary;

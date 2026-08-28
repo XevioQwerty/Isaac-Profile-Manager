@@ -65,6 +65,84 @@ public sealed class WorkshopViewModel : ObservableObject
             () => Open(WorkshopService.InSteamClient(WorkshopService.SubscribedItemsUrl(AccountId)!)),
             () => WorkshopService.SubscribedItemsUrl(AccountId) is not null);
         OpenContentFolderCommand = new RelayCommand(OpenContentFolder, () => ContentRoot is not null);
+
+        UnsubscribeAllCommand = new RelayCommand(async () => await UnsubscribeAllAsync(), () => !_shell.IsBusy);
+    }
+
+    public RelayCommand UnsubscribeAllCommand { get; }
+
+    /// <summary>
+    /// Drop every Workshop subscription for Isaac in one go.
+    ///
+    /// This is the state the library is designed around: with nothing
+    /// subscribed, a game update has nothing to re-lay into whichever profile is
+    /// junctioned. Doing it one item at a time through the Steam UI is the chore
+    /// this replaces.
+    ///
+    /// It does not remove anything from a profile. Folders Isaac already
+    /// materialised are plain copies that Steam no longer has a claim on —
+    /// deleting a user's mods as a side effect of a Steam operation would be a
+    /// surprise, so that stays a separate, deliberate action.
+    /// </summary>
+    private async Task UnsubscribeAllAsync()
+    {
+        var gameDir = _shell.Config?.GameDir;
+        if (string.IsNullOrWhiteSpace(gameDir))
+        {
+            MessageBox.Show("No game directory in the config, so Steam's API cannot be reached.",
+                            "Unsubscribe from everything", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var pull = new WorkshopPullService(gameDir);
+        if (!pull.IsAvailable)
+        {
+            MessageBox.Show(WorkshopPullService.NotFoundMessage(),
+                            "Unsubscribe from everything", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            "Unsubscribe from every Isaac Workshop item on this Steam account?" +
+            Environment.NewLine + Environment.NewLine +
+            "Steam will delete its downloaded copies in steamapps\\workshop. Anything already imported into the " +
+            "library is a separate copy and is not touched, and neither are your profiles." +
+            Environment.NewLine + Environment.NewLine +
+            "Import anything you still want first — after unsubscribing, the Workshop's copy is gone.",
+            "Unsubscribe from everything", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+
+        if (confirm != MessageBoxResult.OK) return;
+
+        _shell.IsBusy = true;
+        ProgressText = "Asking Steam what you are subscribed to...";
+
+        try
+        {
+            var result = await pull.UnsubscribeAllAsync(new Progress<string>(e => ProgressText = e));
+
+            var message = result.Unsubscribed.Count == 0
+                ? "Nothing was subscribed."
+                : $"Unsubscribed from {result.Unsubscribed.Count} item(s).";
+
+            if (result.SubscribedAfter > 0)
+                message += $" Steam still reports {result.SubscribedAfter} — try again in a moment.";
+
+            foreach (var error in result.Errors) message += $" {error}";
+
+            _shell.Report(message);
+            MessageBox.Show(message, "Unsubscribe from everything", MessageBoxButton.OK, MessageBoxImage.Information);
+            Refresh();
+        }
+        catch (Exception ex)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Unsubscribe from everything", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            ProgressText = string.Empty;
+            _shell.IsBusy = false;
+        }
     }
 
     public RelayCommand BrowseWorkshopCommand { get; }

@@ -115,6 +115,7 @@
                     <Button Content="Open library folder" Command="{Binding OpenLibraryCommand}" Margin="0,0,8,8"/>
                     <Button Content="Browse the Workshop" Command="{Binding BrowseWorkshopCommand}" Margin="0,0,8,8"/>
                     <Button Content="My subscribed items" Command="{Binding OpenSubscriptionsCommand}" Margin="0,0,8,8"/>
+                    <Button Content="Unsubscribe from everything" Command="{Binding UnsubscribeAllCommand}" Margin="0,0,8,8"/>
                 </WrapPanel>
 
                 <CheckBox Content="Capture previews and descriptions from Steam during import"
