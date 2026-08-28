@@ -11,7 +11,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- Bump before tagging a release; the exe's file version comes from this. -->
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <Product>Isaac Profile Manager</Product>
     <Description>Switch Binding of Isaac mod profiles, saves and builds without a second install.</Description>
 
@@ -35,5 +35,39 @@
          taskbar show it and not the default WPF icon. -->
     <Resource Include="app.ico" />
   </ItemGroup>
+
+  <!--
+    The Steam helper is a second executable, not a library, because Isaac ships
+    only a 32-bit steam_api.dll and this app is x64. It cannot be a normal
+    reference: it has to be published for win-x86 on its own and land beside the
+    exe. In a dev build WorkshopPullService finds it in the helper's own bin
+    folder instead, so only the release path needs this.
+  -->
+  <PropertyGroup>
+    <SteamHelperProject>$(MSBuildThisFileDirectory)..\IsaacProfileManager.SteamHelper\IsaacProfileManager.SteamHelper.csproj</SteamHelperProject>
+    <SteamHelperExe>$(MSBuildThisFileDirectory)..\IsaacProfileManager.SteamHelper\bin\$(Configuration)\net8.0\win-x86\publish\ipm-steam-helper.exe</SteamHelperExe>
+  </PropertyGroup>
+
+  <!--
+    The file list is added inside the target, not as a static Content item: the
+    helper does not exist when items are evaluated on a clean tree, so a static
+    item silently publishes nothing. ExcludeFromSingleFile keeps it a loose exe
+    beside the app instead of being bundled inside it, which is the whole point
+    - a 64-bit bundle cannot run a 32-bit payload.
+  -->
+  <Target Name="PublishSteamHelper" BeforeTargets="ComputeResolvedFilesToPublishList">
+    <Exec Command="dotnet publish &quot;$(SteamHelperProject)&quot; -c $(Configuration) --nologo -v quiet" />
+
+    <Error Condition="!Exists('$(SteamHelperExe)')"
+           Text="The Steam helper did not publish to $(SteamHelperExe). Shipping without it would leave the Workshop update feature dead." />
+
+    <ItemGroup>
+      <ResolvedFileToPublish Include="$(SteamHelperExe)">
+        <RelativePath>ipm-steam-helper.exe</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 
 </Project>

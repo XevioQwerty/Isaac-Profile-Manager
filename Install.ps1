@@ -57,6 +57,18 @@ Copy-Item $published $target -Force
 $version = (Get-Item $target).VersionInfo.FileVersion
 Write-Host "  Installed v$version to $target" -ForegroundColor Green
 
+# The 32-bit Steam helper travels beside the exe. It is a separate process
+# because Isaac ships only a 32-bit steam_api.dll and the app is x64; without it
+# the library can still be checked for updates but not resubscribed.
+$helperName = 'ipm-steam-helper.exe'
+$helper = Join-Path $project "bin\Release\net8.0-windows\win-x64\publish\$helperName"
+if (Test-Path $helper) {
+    Copy-Item $helper (Join-Path $Destination $helperName) -Force
+    Write-Host "  Installed the Steam helper alongside it" -ForegroundColor Green
+} else {
+    Write-Host "  Warning: $helperName was not published. Workshop updates will be unavailable." -ForegroundColor Yellow
+}
+
 # --- Shortcuts ----------------------------------------------------------
 if (-not $NoShortcut) {
     $shell = New-Object -ComObject WScript.Shell

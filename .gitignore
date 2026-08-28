@@ -17,3 +17,6 @@ obj/
 # Update watcher (contains your Discord webhook URL)
 update-watcher.json
 update-watcher-state.json
+
+# Release artifacts from Package.ps1 - built, never committed.
+dist/
