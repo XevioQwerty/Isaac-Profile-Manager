@@ -92,7 +92,7 @@
                         <Button Content="Import..." Command="{Binding ImportProfileCommand}"/>
                     </StackPanel>
                     <TextBlock Style="{StaticResource Dim}" Margin="0,8,0,0"
-                               Text="Import takes a profile file someone sent you and builds it from your library."/>
+                               Text="Import takes a share code or a profile file someone sent you, downloads whatever is missing from the Workshop, and builds the profile."/>
                 </StackPanel>
             </Border>
         </Grid>

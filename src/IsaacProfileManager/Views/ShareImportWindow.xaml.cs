@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http;
 using System.Windows;
 using IsaacProfileManager.Core.Services;
@@ -44,6 +45,57 @@ public partial class ShareImportWindow : Window
         }
     }
 
+    /// <summary>
+    /// Load a profile file, the same thing "Export this profile" writes.
+    ///
+    /// Files made before share codes existed carry no Workshop ids, so nothing
+    /// can be downloaded from them — which is exactly the trap the old
+    /// Mod-profiles import fell into, silently building an empty profile. That
+    /// case is called out rather than left to be discovered.
+    /// </summary>
+    private void OnOpenFile(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Open a profile someone sent you",
+            Filter = "Isaac profile export|*.json|All files (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            Load(LibraryHashService.ReadExport(dialog.FileName));
+
+            if (_share is { IsFetchable: false } && _plan is { ToFetch.Count: 0 } && _plan.Items.Count > 0)
+                MessageBox.Show(
+                    "That file lists mods but carries no Workshop ids, so nothing can be downloaded from it. " +
+                    "It was made by an older version." + Environment.NewLine + Environment.NewLine +
+                    "Ask whoever sent it to send a share code instead, from the Library tab.",
+                    "Nothing to download", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        catch (Exception ex) when (ex is ConfigSchemaMismatchException or IOException)
+        {
+            StatusText.Text = ex.Message;
+        }
+    }
+
+    /// <summary>Show a share and what importing it would do.</summary>
+    private void Load(SharedProfile share)
+    {
+        _share = share;
+
+        var runner = new ShareImportRunner(_library, _pull, _process);
+        _plan = runner.Plan(share);
+
+        PlanList.ItemsSource = _plan.Items;
+        StatusText.Text = _plan.Summary;
+
+        if (ProfileNameBox.Text.Length == 0) ProfileNameBox.Text = share.Name;
+        ImportButton.IsEnabled = true;
+        SubscribeButton.IsEnabled = _plan.ToFetch.Count > 0;
+    }
+
     private async void OnRead(object sender, RoutedEventArgs e)
     {
         var input = CodeBox.Text?.Trim() ?? string.Empty;
@@ -56,18 +108,9 @@ public partial class ShareImportWindow : Window
 
         try
         {
-            _share = input.StartsWith(ShareCodeService.Prefix, StringComparison.OrdinalIgnoreCase)
+            Load(input.StartsWith(ShareCodeService.Prefix, StringComparison.OrdinalIgnoreCase)
                 ? ShareCodeService.Decode(input)
-                : await FromCollectionAsync(input);
-
-            var runner = new ShareImportRunner(_library, _pull, _process);
-            _plan = runner.Plan(_share);
-
-            PlanList.ItemsSource = _plan.Items;
-            StatusText.Text = _plan.Summary;
-
-            if (ProfileNameBox.Text.Length == 0) ProfileNameBox.Text = _share.Name;
-            ImportButton.IsEnabled = true;
+                : await FromCollectionAsync(input));
         }
         catch (ShareCodeException ex)
         {
@@ -193,6 +236,83 @@ public partial class ShareImportWindow : Window
             ImportButton.IsEnabled = true;
             ReadButton.IsEnabled = true;
             CloseButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Subscribe to what is missing and stop there.
+    ///
+    /// The escape hatch for when the full cycle will not fetch: this leaves the
+    /// subscriptions in place so Steam downloads them the ordinary way, and the
+    /// Workshop tab can then import them into the library by hand. It is not the
+    /// default because a live subscription is exactly what re-lays mods into the
+    /// active profile on launch — the state this tool normally keeps you out of.
+    /// </summary>
+    private async void OnSubscribeOnly(object sender, RoutedEventArgs e)
+    {
+        if (_plan is null) return;
+
+        var ids = _plan.ToFetch.Where(i => i.WorkshopId is not null)
+                               .Select(i => i.WorkshopId!)
+                               .Distinct(StringComparer.Ordinal)
+                               .ToList();
+
+        if (ids.Count == 0)
+        {
+            MessageBox.Show("Nothing here needs downloading.", "Subscribe",
+                            MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Subscribe to {ids.Count} mod(s) in Steam and leave them subscribed?" +
+            Environment.NewLine + Environment.NewLine +
+            "Steam will download them in the background. Nothing is added to your library by this — come back and " +
+            "press Import once they have finished, or import them from the Workshop tab." +
+            Environment.NewLine + Environment.NewLine +
+            "While they stay subscribed, launching the game will copy them into whichever profile is active.",
+            "Subscribe in Steam", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+
+        if (confirm != MessageBoxResult.OK) return;
+
+        SubscribeButton.IsEnabled = false;
+        ImportButton.IsEnabled = false;
+
+        try
+        {
+            var result = await _pull.SubscribeAsync(ids, new Progress<string>(m => ProgressText.Text = m));
+
+            var lines = new List<string>
+            {
+                result.Ok
+                    ? $"Subscribed to {ids.Count} mod(s). Steam is downloading them now."
+                    : "Steam did not accept every subscription.",
+                $"Steam now reports {result.SubscribedAfter} subscription(s) for Isaac.",
+            };
+
+            if (result.OwnsApp == false)
+                lines.Add("This Steam account does not own The Binding of Isaac: Rebirth, which is why Steam will " +
+                          "not subscribe. Sign in to the account that owns the game.");
+
+            lines.AddRange(result.Warnings);
+            lines.AddRange(result.Errors);
+
+            ProgressText.Text = string.Empty;
+            StatusText.Text = lines[0];
+
+            MessageBox.Show(string.Join(Environment.NewLine + Environment.NewLine, lines), "Subscribe in Steam",
+                            MessageBoxButton.OK,
+                            result.Ok ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            ProgressText.Text = string.Empty;
+            MessageBox.Show(ex.Message, "Subscribe in Steam", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            SubscribeButton.IsEnabled = true;
+            ImportButton.IsEnabled = true;
         }
     }
 

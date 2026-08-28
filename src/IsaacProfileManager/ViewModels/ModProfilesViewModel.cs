@@ -97,28 +97,37 @@ public sealed class ModProfilesViewModel : ObservableObject
         },
         parameter => parameter is DiscoveredProfile && _shell.Config is not null);
 
+    /// <summary>
+    /// Import a profile from a code or a file.
+    ///
+    /// This used to be a separate, weaker import that only linked mods already
+    /// in the library and downloaded nothing — so importing a 25-mod profile on
+    /// a machine with an empty library produced an empty profile and no
+    /// explanation. Two imports that did different things was the real defect;
+    /// there is now one, and it can fetch.
+    /// </summary>
     public RelayCommand ImportProfileCommand => new(
         () =>
         {
-            if (_shell.Config is null) return;
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "Import a profile someone sent you",
-                Filter = "Isaac profile export|*.json|All files (*.*)|*.*",
-                CheckFileExists = true,
-            };
-            if (dialog.ShowDialog() != true) return;
+            var syncRoot = _shell.Config?.SyncRoot;
+            var gameDir = _shell.Config?.GameDir;
+            if (string.IsNullOrWhiteSpace(syncRoot)) return;
 
-            Run(() =>
+            var window = new Views.ShareImportWindow(
+                new ModLibraryService(_shell.Junctions, syncRoot),
+                new WorkshopPullService(gameDir ?? string.Empty),
+                _shell.Process)
             {
-                var (name, report, missing) = _shell.ModProfileService.ImportSharedProfile(_shell.Config!, dialog.FileName);
-                _shell.Report(missing.Count == 0
-                    ? $"Imported '{name}' — all {report?.Created.Count ?? 0} mod(s) linked from your library."
-                    : $"Imported '{name}', but {missing.Count} mod(s) are missing from your library: {string.Join(", ", missing.Take(4))}" +
-                      (missing.Count > 4 ? "..." : ""));
-            });
+                Owner = System.Windows.Application.Current?.MainWindow,
+            };
+
+            window.ShowDialog();
+            if (!window.Changed) return;
+
+            _shell.Report("Imported a shared mod set.");
+            Refresh();
         },
-        () => _shell.Config is not null);
+        () => _shell.Config?.SyncRoot is not null);
 
     public ObservableCollection<ProfileItem> Profiles { get; } = new();
 
@@ -251,15 +260,17 @@ public sealed class ModProfilesViewModel : ObservableObject
     {
         if (_shell.Config is null || Selected is null) return;
 
-        if (Ask($"Remove '{Selected.Name}' from the profile list?\n\n" +
-                $"The mod folder stays on disk:\n{Selected.Path}") != MessageBoxResult.Yes)
+        if (Ask($"Delete the profile '{Selected.Name}'?\n\n" +
+                $"This removes it from the list, deletes its manifest, and deletes:\n{Selected.Path}\n\n" +
+                "Links into the shared library are unlinked, so the library itself is untouched. " +
+                "Any real mod folder inside is moved to .backup rather than deleted.") != MessageBoxResult.Yes)
             return;
 
         Run(() =>
         {
             var name = Selected!.Name;
-            _shell.ModProfileService.Remove(_shell.Config!, name);
-            _shell.Report($"Removed '{name}' from the list. Its folder was left alone.");
+            var removal = _shell.ModProfileService.Remove(_shell.Config!, name);
+            _shell.Report(removal.Summary);
         });
     }
 
