@@ -41,6 +41,39 @@ public static class AppPaths
     }
 
     /// <summary>
+    /// The running build, as three numbers. Read from the assembly rather than a
+    /// constant so it cannot drift from what was actually compiled.
+    /// </summary>
+    public static string Version
+    {
+        get
+        {
+            var version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version
+                       ?? typeof(AppPaths).Assembly.GetName().Version;
+
+            return version is null ? "unknown" : $"{version.Major}.{version.Minor}.{version.Build}";
+        }
+    }
+
+    /// <summary>
+    /// The file version stamped on an executable beside this one, or null when
+    /// it is not there. Used to show that the app and the Steam helper are the
+    /// same build, since they ship as a pair and break subtly when they are not.
+    /// </summary>
+    public static string? VersionOf(string fileName)
+    {
+        foreach (var root in ProbeRoots())
+        {
+            var path = Path.Combine(root, fileName);
+            if (!File.Exists(path)) continue;
+
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(path);
+            return info.FileVersion;
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Places a file shipped with the app could be, nearest first: beside the
     /// executable, then the bundle's extraction directory when they differ.
     /// </summary>

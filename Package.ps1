@@ -44,9 +44,9 @@ Write-Host ''
 # --- Version ------------------------------------------------------------
 # Single source of truth is the csproj; the installer and the zip name both
 # follow it so a release cannot ship three different version numbers.
-$csproj  = Join-Path $project 'IsaacProfileManager.csproj'
-$version = ([xml](Get-Content $csproj)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
-if (-not $version) { throw "No <Version> in $csproj" }
+$props   = Join-Path $root 'Directory.Build.props'
+$version = ([xml](Get-Content $props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+if (-not $version) { throw "No <Version> in $props" }
 Write-Host "  Version $version" -ForegroundColor Gray
 
 # --- Publish ------------------------------------------------------------
@@ -73,6 +73,16 @@ Copy-Item (Join-Path $root 'LICENSE')        $portable -Force
 
 $staged = Get-ChildItem $portable | Measure-Object -Property Length -Sum
 Write-Host ("  Staged {0} files, {1:N0} MB" -f $staged.Count, ($staged.Sum / 1MB)) -ForegroundColor Gray
+
+# Shipping a mismatched pair is the failure nobody can diagnose from the outside,
+# so refuse to package one.
+foreach ($file in $appExe, $helperExe) {
+    $stamped = (Get-Item (Join-Path $portable $file)).VersionInfo.FileVersion
+    Write-Host ("    {0,-24} {1}" -f $file, $stamped) -ForegroundColor Gray
+    if ($stamped -notlike "$version*") {
+        throw "$file is stamped $stamped but this is release $version. Both must come from Directory.Build.props."
+    }
+}
 
 # --- Zip ----------------------------------------------------------------
 if (-not $SkipZip) {

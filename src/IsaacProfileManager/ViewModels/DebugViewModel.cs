@@ -174,12 +174,21 @@ public sealed class DebugViewModel : ObservableObject
         {
             var pull = new WorkshopPullService(_shell.Config?.GameDir ?? string.Empty);
 
+            var helperVersion = Core.AppPaths.VersionOf(WorkshopPullService.HelperFileName);
+
             var lines = new List<string>
             {
+                $"app version     {Core.AppPaths.Version}",
+                $"helper version  {helperVersion ?? "(not found)"}",
                 $"app folder      {Core.AppPaths.ExecutableDirectory}",
                 $"bundle folder   {AppContext.BaseDirectory}",
                 $"steam helper    {(pull.IsAvailable ? "found" : "NOT FOUND")}",
             };
+
+            // They ship as a pair. A stale helper beside a new app is a real
+            // state, and one nobody can see without being told to look.
+            if (helperVersion is not null && !helperVersion.StartsWith(Core.AppPaths.Version, StringComparison.Ordinal))
+                lines.Add("MISMATCH        the app and the Steam helper are different builds — reinstall");
 
             if (pull.IsAvailable)
                 lines.Add($"                {pull.HelperPath}");

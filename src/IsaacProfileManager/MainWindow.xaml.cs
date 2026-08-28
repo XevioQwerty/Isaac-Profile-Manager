@@ -14,6 +14,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = _viewModel;
 
+        // In the title bar because that is the one place a user can read it
+        // without knowing where to look. "Which build am I running?" was
+        // otherwise only answerable from the file's properties dialog.
+        Title = $"Isaac Profile Manager {Core.AppPaths.Version}";
+
         // The junction and the launcher ini can both change behind our back —
         // the PowerShell script writes the same config, and the launcher rewrites
         // its ini on exit. Poll rather than trust what we last wrote.
