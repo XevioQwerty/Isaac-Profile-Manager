@@ -115,6 +115,108 @@ public sealed class ModLibraryService
     }
 
     /// <summary>
+    /// Replace a library entry's contents with a freshly downloaded revision.
+    ///
+    /// A copy is not enough: <see cref="DirectoryCopier"/> merges, so files the
+    /// author deleted upstream would survive and our bytes would no longer match
+    /// a partner's fresh install — which is the exact desync this library exists
+    /// to prevent. The old copy is moved to a timestamped backup, never deleted,
+    /// so a bad update can be walked back.
+    ///
+    /// Returns the backup path, or null when the entry was new.
+    /// </summary>
+    public string? UpdateFromContent(string entry, string sourceDir, long timeUpdated, long fileSize,
+                                     IProgress<string>? progress = null)
+    {
+        if (!Directory.Exists(sourceDir))
+            throw new UnsafePathException($"No downloaded content at {sourceDir}.");
+
+        var destination = Path.Combine(LibraryRoot, entry);
+        string? backup = null;
+
+        if (Directory.Exists(destination))
+        {
+            if (_junctions.IsJunction(destination))
+                throw new UnsafePathException(
+                    $"Library entry '{entry}' is a link, not a real folder. Refusing to replace it.");
+
+            backup = Path.Combine(BackupRoot, DateTime.Now.ToString("yyyyMMdd-HHmmss"), LibraryFolderName, entry);
+            Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+            progress?.Report($"Backing up the old {entry}");
+            Directory.Move(destination, backup);
+        }
+
+        progress?.Report($"Installing the new {entry}");
+        Directory.CreateDirectory(LibraryRoot);
+        DirectoryCopier.Copy(sourceDir, destination, overwrite: true, progress: progress);
+        RecordUpstreamStamp(entry, timeUpdated, fileSize);
+        return backup;
+    }
+
+    /// <summary>
+    /// Put freshly downloaded content into the library under a name chosen by
+    /// the sender, not derived locally.
+    ///
+    /// Deriving the name from metadata.xml the way an import does would be wrong
+    /// here: the manifest in the share refers to the sender's entry names, and a
+    /// name that drifts leaves the profile pointing at nothing. Collision
+    /// suffixes are the common case where the two differ.
+    /// </summary>
+    public void InstallFromShare(string entry, string sourceDir, string workshopId,
+                                 long timeUpdated, long fileSize, IProgress<string>? progress = null)
+    {
+        UpdateFromContent(entry, sourceDir, timeUpdated, fileSize, progress);
+
+        // Read the mod's own metadata for the display name, so a shared library
+        // looks the same as a directly imported one.
+        string name = entry, description = string.Empty;
+        var metadataPath = Path.Combine(sourceDir, "metadata.xml");
+        if (File.Exists(metadataPath))
+        {
+            try
+            {
+                var metadata = System.Xml.Linq.XDocument.Load(metadataPath).Root;
+                name = metadata?.Element("name")?.Value.Trim() is { Length: > 0 } n ? n : entry;
+                description = metadata?.Element("description")?.Value.Trim() ?? string.Empty;
+            }
+            catch (System.Xml.XmlException)
+            {
+                // Hand-edited metadata is common; the entry name is a fine fallback.
+            }
+        }
+
+        var payload = ReadMetadata(entry) ?? new CachedMetadata();
+        payload.Id = workshopId;
+        payload.Name = name;
+        payload.Description = description;
+        if (payload.ImportedUtc.Length == 0) payload.ImportedUtc = DateTime.UtcNow.ToString("o");
+        WriteMetadata(entry, payload);
+
+        // Cache the preview now — after the unsubscribe the content store is gone.
+        var preview = FindPreview(sourceDir);
+        if (preview is not null)
+        {
+            Directory.CreateDirectory(MetadataRoot);
+            try { File.Copy(preview, Path.Combine(MetadataRoot, entry + Path.GetExtension(preview)), overwrite: true); }
+            catch (IOException) { }
+        }
+    }
+
+    private static string? FindPreview(string contentPath)
+    {
+        foreach (var candidate in new[] { "thumb.png", "thumbnail.png", "icon.png", "preview.png", "cover.png" })
+        {
+            var path = Path.Combine(contentPath, candidate);
+            if (File.Exists(path)) return path;
+        }
+        return null;
+    }
+
+    /// <summary>The library entry an already-imported workshop id lives in, if any.</summary>
+    public string? FindEntryByWorkshopId(string workshopId) =>
+        ListEntries().FirstOrDefault(e => GetCachedId(e) == workshopId);
+
+    /// <summary>
     /// The library name for an item: its own folder name, without the workshop
     /// suffix Isaac would append. Collisions get the id back so two different
     /// mods can never silently become one.
@@ -153,21 +255,39 @@ public sealed class ModLibraryService
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string ImportedUtc { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The Workshop's <c>time_updated</c> for the content we hold, as unix
+        /// seconds. Zero for entries imported before this was recorded — those
+        /// fall back to <see cref="ImportedUtc"/>, which is a weaker baseline
+        /// because Steam may have downloaded the content some time before the
+        /// import happened.
+        /// </summary>
+        public long TimeUpdated { get; set; }
+
+        /// <summary>The Workshop's reported size for that revision, in bytes.</summary>
+        public long FileSize { get; set; }
     }
 
     private void SaveMetadata(WorkshopItem item)
     {
         Directory.CreateDirectory(MetadataRoot);
         var entry = ResolveEntryName(item);
+
+        // Carry forward the upstream stamp: an import knows the bytes it copied
+        // but not which Workshop revision they are. Overwriting it with zero
+        // would make a freshly updated mod look like it had never been checked.
+        var existing = ReadMetadata(entry);
         var payload = new CachedMetadata
         {
             Id = item.Id,
             Name = item.Name,
             Description = item.Description,
             ImportedUtc = DateTime.UtcNow.ToString("o"),
+            TimeUpdated = existing?.Id == item.Id ? existing.TimeUpdated : 0,
+            FileSize = existing?.Id == item.Id ? existing.FileSize : 0,
         };
-        File.WriteAllText(Path.Combine(MetadataRoot, entry + ".json"),
-                          JsonSerializer.Serialize(payload, SerializerOptions), new UTF8Encoding(false));
+        WriteMetadata(entry, payload);
 
         // Cache the preview now: after unsubscribing, the content store is gone.
         if (item.LocalImagePath is not null && File.Exists(item.LocalImagePath))
@@ -176,6 +296,26 @@ public sealed class ModLibraryService
             try { File.Copy(item.LocalImagePath, target, overwrite: true); }
             catch (IOException) { }
         }
+    }
+
+    private void WriteMetadata(string entry, CachedMetadata payload)
+    {
+        Directory.CreateDirectory(MetadataRoot);
+        File.WriteAllText(Path.Combine(MetadataRoot, entry + ".json"),
+                          JsonSerializer.Serialize(payload, SerializerOptions), new UTF8Encoding(false));
+    }
+
+    /// <summary>
+    /// Record which Workshop revision an entry's content corresponds to. Called
+    /// after pulling an update, so the next check compares against the revision
+    /// we actually hold rather than the date we happened to import it.
+    /// </summary>
+    public void RecordUpstreamStamp(string entry, long timeUpdated, long fileSize)
+    {
+        var payload = ReadMetadata(entry) ?? new CachedMetadata { Name = entry };
+        payload.TimeUpdated = timeUpdated;
+        payload.FileSize = fileSize;
+        WriteMetadata(entry, payload);
     }
 
     private CachedMetadata? ReadMetadata(string entry)
@@ -452,7 +592,8 @@ public sealed class ModLibraryService
             WorkshopId: metadata?.Id,
             ImportedUtc: metadata?.ImportedUtc,
             SizeBytes: size,
-            FileCount: files);
+            FileCount: files,
+            UpstreamTimeUpdated: metadata?.TimeUpdated ?? 0);
     }
 
     /// <summary>Which profile manifests reference this entry.</summary>
@@ -519,7 +660,8 @@ public sealed record LibraryEntryInfo(
     string? WorkshopId,
     string? ImportedUtc,
     long SizeBytes,
-    int FileCount)
+    int FileCount,
+    long UpstreamTimeUpdated = 0)
 {
     public double SizeMb => Math.Round(SizeBytes / 1024d / 1024d, 1);
 

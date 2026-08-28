@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>IsaacProfileManager.SteamHelper</RootNamespace>
+    <AssemblyName>ipm-steam-helper</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!--
+      x86 is not a preference. Isaac ships only a 32-bit steam_api.dll (machine
+      0x14c), and this process loads the game's own copy rather than shipping
+      one, so it must match. The main app is x64 and shells out to this.
+    -->
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <PlatformTarget>x86</PlatformTarget>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+
+    <!-- Safe to trim: the only JSON here is written by hand with Utf8JsonWriter,
+         and every Steam call is a DllImport. Untrimmed this is 62 MB. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+  </PropertyGroup>
+
+</Project>

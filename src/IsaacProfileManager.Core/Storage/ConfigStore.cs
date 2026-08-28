@@ -58,12 +58,18 @@ public sealed class ConfigStore : IConfigStore
     /// </summary>
     public static string? Discover()
     {
-        var start = AppContext.BaseDirectory;
-        var dir = new DirectoryInfo(start);
-        for (int depth = 0; dir is not null && depth < 8; depth++, dir = dir.Parent)
+        // Beside the executable first. AppContext.BaseDirectory is the bundle's
+        // extraction folder for this single-file build, so starting there walks
+        // up out of %TEMP% and never sees a config sitting next to the exe —
+        // which is why the pointer file below had to exist at all.
+        foreach (var start in AppPaths.ProbeRoots())
         {
-            var candidate = Path.Combine(dir.FullName, FileName);
-            if (File.Exists(candidate)) return candidate;
+            var dir = new DirectoryInfo(start);
+            for (int depth = 0; dir is not null && depth < 8; depth++, dir = dir.Parent)
+            {
+                var candidate = Path.Combine(dir.FullName, FileName);
+                if (File.Exists(candidate)) return candidate;
+            }
         }
 
         if (File.Exists(PointerFile))
