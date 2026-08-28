@@ -41,6 +41,18 @@ public sealed class SharedProfile
     /// <summary>Entry name to content hash. The whole point of the file.</summary>
     [JsonPropertyName("Hashes")]
     public Dictionary<string, string> Hashes { get; set; } = new();
+
+    /// <summary>
+    /// Library entry name to Workshop published file id. Added after the format
+    /// shipped, so it is optional: an export without it can still be compared
+    /// against, it just cannot be fetched. Kept additive rather than bumping the
+    /// schema so older exports stay readable.
+    /// </summary>
+    [JsonPropertyName("WorkshopIds")]
+    public Dictionary<string, string> WorkshopIds { get; set; } = new();
+
+    /// <summary>Entries with an id, which are the ones an import can download.</summary>
+    public bool IsFetchable => WorkshopIds.Count > 0;
 }
 
 public sealed record ProfileDiffEntry(string Entry, ProfileDiffKind Kind, string? MyHash, string? TheirHash);
@@ -259,8 +271,18 @@ public sealed class LibraryHashService
     {
         var hashes = LoadHashes();
 
+        var ids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mod in manifest.Mods)
+        {
+            // A hand-installed mod has no id. It travels in the list so the
+            // recipient is told about it, but nothing can fetch it for them.
+            var id = _library.GetCachedId(mod);
+            if (!string.IsNullOrWhiteSpace(id)) ids[mod] = id;
+        }
+
         return new SharedProfile
         {
+            WorkshopIds = ids,
             Name = profileName,
             Notes = manifest.Notes,
             ExportedUtc = DateTime.UtcNow.ToString("o"),
@@ -270,6 +292,16 @@ public sealed class LibraryHashService
                 .OrderBy(m => m, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(m => m, m => hashes[m], StringComparer.OrdinalIgnoreCase),
         };
+    }
+
+    /// <summary>
+    /// The entire library as one shareable set, for "here is everything I have"
+    /// rather than a single profile.
+    /// </summary>
+    public SharedProfile ExportLibrary(string name, string notes = "")
+    {
+        var entries = _library.ListEntries().ToList();
+        return Export(name, new ProfileManifest { Mods = entries, Notes = notes });
     }
 
     public void WriteExport(SharedProfile profile, string path)
