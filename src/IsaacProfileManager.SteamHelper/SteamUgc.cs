@@ -45,6 +45,16 @@ public sealed class SteamUgc : IDisposable
         "SteamAPI_SteamUGC_v019", "SteamAPI_SteamUGC_v018", "SteamAPI_SteamUGC_v017",
     };
 
+    private static readonly string[] AppsAccessorNames =
+    {
+        "SteamAPI_SteamApps_v008", "SteamAPI_SteamApps_v009", "SteamAPI_SteamApps_v007",
+    };
+
+    private static readonly string[] UserAccessorNames =
+    {
+        "SteamAPI_SteamUser_v023", "SteamAPI_SteamUser_v024", "SteamAPI_SteamUser_v022",
+    };
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr UgcAccessor();
 
@@ -93,14 +103,29 @@ public sealed class SteamUgc : IDisposable
     private static extern uint SteamAPI_ISteamUGC_GetNumSubscribedItems(IntPtr self);
 
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamApps_BIsSubscribedApp(IntPtr self, uint appId);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamUser_BLoggedOn(IntPtr self);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     private static extern uint SteamAPI_ISteamUGC_GetSubscribedItems(
         IntPtr self, [Out] ulong[] publishedFileIds, uint maxEntries);
 
     private static IntPtr _module = IntPtr.Zero;
     private readonly IntPtr _ugc;
+    private readonly IntPtr _apps;
+    private readonly IntPtr _user;
     private bool _shutdown;
 
-    private SteamUgc(IntPtr ugc) => _ugc = ugc;
+    private SteamUgc(IntPtr ugc, IntPtr apps, IntPtr user)
+    {
+        _ugc = ugc;
+        _apps = apps;
+        _user = user;
+    }
 
     /// <summary>
     /// Bring up the Steam API as Isaac and hand back the UGC interface.
@@ -130,19 +155,47 @@ public sealed class SteamUgc : IDisposable
         if (result != 0)
             throw new SteamHelperException(Explain(result, error.ToString()));
 
-        foreach (var accessor in AccessorNames)
+        var ugc = Resolve(AccessorNames);
+        if (ugc == IntPtr.Zero)
         {
-            if (!NativeLibrary.TryGetExport(_module, accessor, out var address)) continue;
-
-            var ugc = Marshal.GetDelegateForFunctionPointer<UgcAccessor>(address)();
-            if (ugc == IntPtr.Zero) continue;
-            return new SteamUgc(ugc);
+            SteamAPI_Shutdown();
+            throw new SteamHelperException(
+                "steam_api.dll exposes no ISteamUGC version this build knows. The game's Steamworks SDK has moved on.");
         }
 
-        SteamAPI_Shutdown();
-        throw new SteamHelperException(
-            "steam_api.dll exposes no ISteamUGC version this build knows. The game's Steamworks SDK has moved on.");
+        // Apps and User are best-effort: without them the ownership check is
+        // simply unavailable, which is worse than having it but not fatal.
+        return new SteamUgc(ugc, Resolve(AppsAccessorNames), Resolve(UserAccessorNames));
     }
+
+    private static IntPtr Resolve(string[] candidates)
+    {
+        foreach (var name in candidates)
+        {
+            if (!NativeLibrary.TryGetExport(_module, name, out var address)) continue;
+
+            var pointer = Marshal.GetDelegateForFunctionPointer<UgcAccessor>(address)();
+            if (pointer != IntPtr.Zero) return pointer;
+        }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// Whether the signed-in account owns the app.
+    ///
+    /// This is the check that explains the otherwise silent failure: Steam only
+    /// lets you subscribe to Workshop items for a game you own. Without a
+    /// licence, SubscribeItem is accepted and then does nothing, the item sits
+    /// in state None forever, and a caller polling for "installed" simply waits
+    /// out its timeout with nothing to report.
+    ///
+    /// Null when ISteamApps could not be resolved, which is not the same as false.
+    /// </summary>
+    public bool? OwnsApp() =>
+        _apps == IntPtr.Zero ? null : SteamAPI_ISteamApps_BIsSubscribedApp(_apps, IsaacAppId);
+
+    public bool? IsLoggedOn() =>
+        _user == IntPtr.Zero ? null : SteamAPI_ISteamUser_BLoggedOn(_user);
 
     /// <summary>ESteamAPIInitResult, turned into something a player can act on.</summary>
     private static string Explain(int result, string detail)

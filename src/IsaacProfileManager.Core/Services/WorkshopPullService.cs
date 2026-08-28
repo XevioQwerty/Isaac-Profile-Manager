@@ -22,6 +22,19 @@ public sealed record PullResult(
     /// <summary>Ids the helper reported dropping. Set by the unsubscribe verbs.</summary>
     public IReadOnlyList<string> Unsubscribed { get; init; } = Array.Empty<string>();
 
+    /// <summary>Non-fatal problems, such as an item Steam refused to subscribe to.</summary>
+    public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Whether the signed-in account owns the game. Null when the helper could
+    /// not determine it. False is the answer that explains a run in which
+    /// nothing downloads and nothing errors: Steam does not allow Workshop
+    /// subscriptions for a game you do not own.
+    /// </summary>
+    public bool? OwnsApp { get; init; }
+
+    public bool? LoggedOn { get; init; }
+
     /// <summary>How many were subscribed when the helper connected.</summary>
     public uint SubscribedBefore { get; init; }
 }
@@ -155,9 +168,12 @@ public sealed class WorkshopPullService : IWorkshopPullService
 
         var items = new List<PulledItem>();
         var errors = new List<string>();
+        var warnings = new List<string>();
         var dropped = new List<string>();
         uint subscribed = 0;
         uint? before = null;
+        bool? ownsApp = null;
+        bool? loggedOn = null;
 
         using var process = new Process { StartInfo = start };
         process.Start();
@@ -173,8 +189,10 @@ public sealed class WorkshopPullService : IWorkshopPullService
             try
             {
                 var message = JsonDocument.Parse(line).RootElement;
-                Handle(message, items, errors, dropped, ref subscribed, progress);
+                Handle(message, items, errors, warnings, dropped, ref subscribed, progress);
                 before ??= subscribed;
+                ownsApp ??= Flag(message, "ownsApp");
+                loggedOn ??= Flag(message, "loggedOn");
             }
             catch (JsonException)
             {
@@ -195,11 +213,15 @@ public sealed class WorkshopPullService : IWorkshopPullService
         {
             Unsubscribed = dropped,
             SubscribedBefore = before ?? 0,
+            Warnings = warnings,
+            OwnsApp = ownsApp,
+            LoggedOn = loggedOn,
         };
     }
 
     private static void Handle(JsonElement message, List<PulledItem> items, List<string> errors,
-                              List<string> dropped, ref uint subscribed, IProgress<string>? progress)
+                              List<string> warnings, List<string> dropped, ref uint subscribed,
+                              IProgress<string>? progress)
     {
         switch (Text(message, "event"))
         {
@@ -232,6 +254,11 @@ public sealed class WorkshopPullService : IWorkshopPullService
                 progress?.Report($"Unsubscribed from {dropped_id}");
                 break;
 
+            case "warning":
+                var note = Text(message, "message");
+                if (note is not null) warnings.Add($"{Text(message, "id")}: {note}");
+                break;
+
             case "error":
                 errors.Add(Text(message, "message") ?? "The Steam helper failed without saying why.");
                 break;
@@ -241,6 +268,16 @@ public sealed class WorkshopPullService : IWorkshopPullService
     private static string? Text(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
+            : null;
+
+    private static bool? Flag(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value)
+            ? value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => null,
+            }
             : null;
 
     private static long? Number(JsonElement element, string name) =>

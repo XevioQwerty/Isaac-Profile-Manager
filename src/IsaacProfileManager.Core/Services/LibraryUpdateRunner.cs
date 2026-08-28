@@ -87,7 +87,7 @@ public sealed class LibraryUpdateRunner
 
                 if (!item.Installed)
                 {
-                    failed.Add($"{entry}: Steam reported '{item.State}'.");
+                    failed.Add(ExplainState(entry, item.State));
                     continue;
                 }
 
@@ -110,6 +110,11 @@ public sealed class LibraryUpdateRunner
             }
 
             foreach (var error in pulled.Errors) warnings.Add(error);
+            foreach (var note in pulled.Warnings) warnings.Add(note);
+
+            if (pulled.OwnsApp == false)
+                warnings.Add("This Steam account does not own The Binding of Isaac: Rebirth. Steam will " +
+                             "not let it subscribe to Workshop items, which is why nothing downloaded.");
         }
         finally
         {
@@ -128,4 +133,14 @@ public sealed class LibraryUpdateRunner
 
         return new UpdateRunReport(updated, failed, warnings, backups);
     }
+
+    /// <summary>Turn a helper item state into something worth reading.</summary>
+    private static string ExplainState(string entry, string state) => state switch
+    {
+        "not-subscribed" => $"{entry}: Steam never registered the subscription. The item may have been removed " +
+                            "from the Workshop, or this account cannot get it.",
+        "timeout" => $"{entry}: the download did not finish in time.",
+        "missing" => $"{entry}: Steam reported it installed but could not say where.",
+        _ => $"{entry}: Steam reported '{state}'.",
+    };
 }

@@ -11,7 +11,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- Bump before tagging a release; the exe's file version comes from this. -->
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Product>Isaac Profile Manager</Product>
     <Description>Switch Binding of Isaac mod profiles, saves and builds without a second install.</Description>
 

@@ -42,7 +42,14 @@ public static class Program
         var options = Options.Parse(args);
 
         using var steam = SteamUgc.Connect(options.GameDir);
-        Emit("ready", new() { ["subscribed"] = steam.SubscribedCount() });
+
+        var owns = steam.OwnsApp();
+        Emit("ready", new()
+        {
+            ["subscribed"] = steam.SubscribedCount(),
+            ["ownsApp"] = owns,
+            ["loggedOn"] = steam.IsLoggedOn(),
+        });
 
         return options.Verb switch
         {
@@ -65,6 +72,20 @@ public static class Program
     /// </summary>
     private static int Pull(SteamUgc steam, Options options)
     {
+        // Steam only allows Workshop subscriptions for a game the account owns.
+        // Without this check the run looks identical to a slow download and
+        // then times out with nothing to say, which is exactly how it was first
+        // reported: "it is not downloading them".
+        if (steam.OwnsApp() == false)
+        {
+            Emit("error", new()
+            {
+                ["message"] = "This Steam account does not own The Binding of Isaac: Rebirth, so Steam will not " +
+                              "let it subscribe to Workshop items. Sign in to the account that owns the game.",
+            });
+            return 1;
+        }
+
         var pending = new Dictionary<ulong, Stopwatch>();
 
         foreach (var id in options.Ids)
@@ -74,6 +95,25 @@ public static class Program
             pending[id] = Stopwatch.StartNew();
             Emit("subscribed", new() { ["id"] = id.ToString() });
         }
+
+        // A subscribe is a request, not a result. Pump callbacks briefly and then
+        // ask Steam which items it actually holds, so an id that was rejected is
+        // named now rather than after the download timeout expires.
+        var settle = Stopwatch.StartNew();
+        while (settle.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            steam.RunCallbacks();
+            Thread.Sleep(PollMilliseconds);
+        }
+
+        var registered = steam.SubscribedItems().ToHashSet();
+        foreach (var id in options.Ids.Where(id => !registered.Contains(id)))
+            Emit("warning", new()
+            {
+                ["id"] = id.ToString(),
+                ["message"] = "Steam did not register a subscription for this item. It may have been removed from " +
+                              "the Workshop, or be unavailable to this account.",
+            });
 
         var deadline = Stopwatch.StartNew();
         var reported = new Dictionary<ulong, ulong>();
@@ -123,6 +163,25 @@ public static class Program
                         ["path"] = info.Value.Folder,
                         ["size"] = info.Value.SizeOnDisk,
                         ["timestamp"] = info.Value.Timestamp,
+                    });
+                    continue;
+                }
+
+                // An item Steam never acknowledged stays at None forever. Waiting
+                // the full download timeout for it tells the user nothing and
+                // looks like a hang, so cut it loose early and say why.
+                // Only items Steam never acknowledged. An item queued behind 24
+                // others reports DownloadPending, not None, so a slow queue is
+                // never mistaken for a rejected subscription.
+                if (state == ItemState.None && !registered.Contains(id) && since.Elapsed >= options.Stall)
+                {
+                    pending.Remove(id);
+                    incomplete = true;
+                    Emit("item", new()
+                    {
+                        ["id"] = id.ToString(),
+                        ["state"] = "not-subscribed",
+                        ["itemState"] = state.ToString(),
                     });
                     continue;
                 }
@@ -215,6 +274,9 @@ public static class Program
         public string GameDir { get; private set; } = string.Empty;
         public TimeSpan Timeout { get; private set; } = TimeSpan.FromMinutes(10);
         public TimeSpan Settle { get; private set; } = TimeSpan.FromSeconds(5);
+
+        /// <summary>How long an item may sit in state None before it is given up on.</summary>
+        public TimeSpan Stall { get; private set; } = TimeSpan.FromSeconds(45);
         public List<ulong> Ids { get; } = new();
 
         public static Options Parse(string[] args)
@@ -238,6 +300,9 @@ public static class Program
                         break;
                     case "--settle":
                         options.Settle = TimeSpan.FromSeconds(ParseSeconds(Next(args, ref i, "--settle")));
+                        break;
+                    case "--stall":
+                        options.Stall = TimeSpan.FromSeconds(ParseSeconds(Next(args, ref i, "--stall")));
                         break;
                     default:
                         if (!ulong.TryParse(args[i], out var id))
