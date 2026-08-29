@@ -30,7 +30,8 @@ public class PatchServiceTests
     private static void GivePatch(PatchService service, string name,
                                   Dictionary<string, string> files,
                                   PatchTarget target = PatchTarget.GameRoot,
-                                  IEnumerable<string>? deletes = null)
+                                  IEnumerable<string>? deletes = null,
+                                  IEnumerable<string>? volatiles = null)
     {
         var dir = Path.Combine(service.PatchesRoot, name);
         foreach (var (relative, contents) in files)
@@ -45,6 +46,7 @@ public class PatchServiceTests
             Name = name,
             Target = target,
             Delete = deletes?.ToList() ?? new List<string>(),
+            Volatile = volatiles?.ToList() ?? new List<string>(),
         });
     }
 
@@ -573,6 +575,168 @@ public class PatchServiceTests
         Assert.True(info.States.Single(t => t.Target == PatchTarget.GameRoot).IsApplied);
         Assert.False(info.States.Single(t => t.Target == PatchTarget.Repentogon).IsApplied);
         Assert.True(info.IsAppliedAnywhere);
+    }
+
+    // --- Files the game rewrites -------------------------------------------
+
+    [Fact]
+    public void AVolatileFileIsNotReportedAsDrift()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix",
+                  new() { ["OnlineFix.ini"] = "[Main]", ["OnlineFix.dll"] = "dll" },
+                  volatiles: new[] { "OnlineFix.ini" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+
+        // The game has rewritten its config, as it does on every launch.
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "[Main]\nBuildId=7");
+
+        Assert.Empty(service.DetectDrift("fix", PatchTarget.GameRoot));
+    }
+
+    [Fact]
+    public void AVolatileFileDoesNotBlockTheRevert()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix",
+                  new() { ["OnlineFix.ini"] = "[Main]", ["OnlineFix.dll"] = "dll" },
+                  volatiles: new[] { "OnlineFix.ini" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "[Main]\nBuildId=7");
+
+        var result = service.Revert("fix", PatchTarget.GameRoot);
+
+        // This is the trap: a skipped file keeps the journal, so the patch could
+        // never be taken fully off however many times you tried.
+        Assert.Empty(result.Skipped);
+        Assert.False(service.IsApplied("fix", PatchTarget.GameRoot));
+        Assert.False(File.Exists(Path.Combine(game, "OnlineFix.ini")));
+        Assert.False(File.Exists(Path.Combine(game, "OnlineFix.dll")));
+    }
+
+    [Fact]
+    public void ANonVolatileFileStillBlocksTheRevert()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "stock");
+        GivePatch(service, "fix",
+                  new() { ["isaac-ng.exe"] = "patched", ["OnlineFix.ini"] = "[Main]" },
+                  volatiles: new[] { "OnlineFix.ini" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "a game update");
+
+        var result = service.Revert("fix", PatchTarget.GameRoot);
+
+        // Marking a config volatile must not weaken the check on the exe.
+        Assert.Single(result.Skipped);
+        Assert.Equal("isaac-ng.exe", result.Skipped[0].Path);
+        Assert.Equal("a game update", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
+    }
+
+    [Fact]
+    public void LogsAreVolatileWithoutBeingDeclared()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["repentogon.log"] = "" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        File.WriteAllText(Path.Combine(game, "repentogon.log"), "a session's worth of logging");
+
+        Assert.Empty(service.DetectDrift("fix", PatchTarget.GameRoot));
+        Assert.Empty(service.Revert("fix", PatchTarget.GameRoot).Skipped);
+    }
+
+    [Fact]
+    public void MarkVolatile_RecordsPathsForNextTime()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["OnlineFix.ini"] = "[Main]" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "rewritten");
+        Assert.Single(service.DetectDrift("fix", PatchTarget.GameRoot));
+
+        service.MarkVolatile("fix", new[] { "OnlineFix.ini" });
+
+        Assert.Empty(service.DetectDrift("fix", PatchTarget.GameRoot));
+        Assert.Contains("OnlineFix.ini", service.LoadManifest("fix").Volatile);
+    }
+
+    [Fact]
+    public void MarkVolatile_DoesNotDuplicateWhatIsAlreadyThere()
+    {
+        using var temp = new TempDir();
+        var (service, _, _, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["a.ini"] = "a" }, volatiles: new[] { "a.ini" });
+
+        service.MarkVolatile("fix", new[] { "a.ini", "a.ini" });
+
+        Assert.Single(service.LoadManifest("fix").Volatile);
+    }
+
+    [Fact]
+    public void OnlySettingsFilesMayBeLearnedAsVolatile()
+    {
+        // The drift prompt offers to remember what changed. The drifted set can
+        // include binaries — another tool stripping this patch's dlls looks the
+        // same as a config being rewritten — and remembering a dll would turn
+        // off the check that stops a revert clobbering a newer file.
+        Assert.True(PatchManifest.CanLearnAsVolatile("OnlineFix.ini"));
+        Assert.True(PatchManifest.CanLearnAsVolatile("isaac-highfps.ini"));
+        Assert.True(PatchManifest.CanLearnAsVolatile("dlllist.txt"));
+
+        Assert.False(PatchManifest.CanLearnAsVolatile("OnlineFix.dll"));
+        Assert.False(PatchManifest.CanLearnAsVolatile("isaac-ng.exe"));
+        Assert.False(PatchManifest.CanLearnAsVolatile("winmm.dll"));
+    }
+
+    [Fact]
+    public void AToolRemovingThePatchesFilesIsReportedAsDriftNotSilence()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["OnlineFix.dll"] = "dll", ["OnlineFix.ini"] = "[Main]" });
+        service.Apply("fix", PatchTarget.GameRoot, game);
+
+        // Something else has cleaned the patch's files out from under it.
+        File.Delete(Path.Combine(game, "OnlineFix.dll"));
+
+        var drift = service.DetectDrift("fix", PatchTarget.GameRoot);
+
+        Assert.Single(drift);
+        Assert.Equal("missing", drift[0].Actual);
+    }
+
+    [Fact]
+    public void RevertingAfterFilesWereRemovedElsewhereStillFinishes()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        File.WriteAllText(Path.Combine(game, "steam_api.dll"), "the real one");
+        GivePatch(service, "fix",
+                  new() { ["OnlineFix.dll"] = "dll", ["steam_api.dll"] = "theirs", ["OnlineFix.ini"] = "[Main]" },
+                  volatiles: new[] { "OnlineFix.ini" });
+        service.Apply("fix", PatchTarget.GameRoot, game);
+
+        // A separate patcher removed what it did not recognise.
+        File.Delete(Path.Combine(game, "OnlineFix.dll"));
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "rewritten at launch");
+
+        var result = service.Revert("fix", PatchTarget.GameRoot);
+
+        // An added file that is already gone is nothing to undo, and the config
+        // is volatile — so the patch comes off rather than sticking forever.
+        Assert.Empty(result.Skipped);
+        Assert.False(service.IsApplied("fix", PatchTarget.GameRoot));
+        Assert.Equal("the real one", File.ReadAllText(Path.Combine(game, "steam_api.dll")));
     }
 
     [Fact]

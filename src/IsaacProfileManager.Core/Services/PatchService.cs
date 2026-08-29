@@ -446,10 +446,15 @@ public sealed class PatchService
         var journal = LoadJournal(patch, target);
         if (journal is null) return Array.Empty<PatchDrift>();
 
+        var manifest = LoadManifest(patch);
         var drift = new List<PatchDrift>();
+
         foreach (var entry in journal.Entries)
         {
             if (entry.Op == PatchOp.Deleted) continue;
+
+            // A file the game rewrites every launch is not evidence of anything.
+            if (manifest.IsVolatile(entry.Path)) continue;
 
             var path = Path.Combine(journal.TargetPath, entry.Path);
             if (!File.Exists(path))
@@ -484,6 +489,7 @@ public sealed class PatchService
         var journal = LoadJournal(patch, target)
                       ?? throw new UnsafePathException($"'{patch}' is not applied to the {target} — there is nothing to undo.");
 
+        var manifest = LoadManifest(patch);
         var skipped = new List<PatchSkip>();
         int removed = 0, restored = 0;
 
@@ -498,7 +504,8 @@ public sealed class PatchService
             {
                 if (!File.Exists(path)) continue;
 
-                if (!force && entry.Sha1After is not null && Sha1Of(path) != entry.Sha1After)
+                if (!force && !manifest.IsVolatile(entry.Path) &&
+                    entry.Sha1After is not null && Sha1Of(path) != entry.Sha1After)
                 {
                     skipped.Add(new PatchSkip(entry.Path, "changed since the patch was applied"));
                     continue;
@@ -517,7 +524,8 @@ public sealed class PatchService
                 continue;
             }
 
-            if (!force && entry.Op == PatchOp.Replaced && File.Exists(path) &&
+            if (!force && !manifest.IsVolatile(entry.Path) &&
+                entry.Op == PatchOp.Replaced && File.Exists(path) &&
                 entry.Sha1After is not null && Sha1Of(path) != entry.Sha1After)
             {
                 skipped.Add(new PatchSkip(entry.Path, "changed since the patch was applied"));
@@ -567,6 +575,24 @@ public sealed class PatchService
         SaveManifest(name, manifest);
 
         return Describe(name);
+    }
+
+    /// <summary>
+    /// Record paths as expected to change, so a later revert stops treating
+    /// them as evidence that something else wrote over the patch.
+    /// </summary>
+    public void MarkVolatile(string patch, IEnumerable<string> relativePaths)
+    {
+        var manifest = LoadManifest(patch);
+
+        foreach (var path in relativePaths)
+        {
+            if (string.IsNullOrWhiteSpace(path)) continue;
+            if (manifest.Volatile.Contains(path, StringComparer.OrdinalIgnoreCase)) continue;
+            manifest.Volatile.Add(path);
+        }
+
+        SaveManifest(patch, manifest);
     }
 
     /// <summary>

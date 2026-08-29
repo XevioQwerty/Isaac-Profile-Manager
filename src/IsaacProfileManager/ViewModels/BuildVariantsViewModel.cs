@@ -41,6 +41,18 @@ public sealed class PatchSlotViewModel : ObservableObject
         : $"{State.DriftCount} file(s) changed since";
 }
 
+/// <summary>Something shipped with the app, waiting to be taken up.</summary>
+public sealed class BundledItemViewModel : ObservableObject
+{
+    public required BundledPatch Item { get; init; }
+
+    public string Name => Item.Name;
+    public string Description => Item.Description;
+    public bool CanInstall => !Item.AlreadyInstalled;
+
+    public string StateText => Item.AlreadyInstalled ? "already added" : string.Empty;
+}
+
 /// <summary>One patch as it appears in the list, with a slot per folder.</summary>
 public sealed class PatchItemViewModel : ObservableObject
 {
@@ -93,6 +105,9 @@ public sealed class BuildVariantsViewModel : ObservableObject
         OpenPatchesFolderCommand = new RelayCommand(OpenPatchesFolder, () => PatchEngine is not null);
         RenamePatchCommand = new RelayCommand(p => RenamePatch(p as PatchItemViewModel),
                                               p => p is PatchItemViewModel);
+        AddBundledCommand = new RelayCommand(p => AddBundled(p as BundledItemViewModel),
+                                             p => p is BundledItemViewModel { CanInstall: true });
+        RunOnlineToolCommand = new RelayCommand(RunOnlineTool, () => Bundled.OnlineToolPath is not null);
     }
 
     /// <summary>
@@ -109,6 +124,17 @@ public sealed class BuildVariantsViewModel : ObservableObject
     public RelayCommand CollapseJunctionCommand { get; }
     public RelayCommand OpenPatchesFolderCommand { get; }
     public RelayCommand RenamePatchCommand { get; }
+    public RelayCommand AddBundledCommand { get; }
+    public RelayCommand RunOnlineToolCommand { get; }
+
+    /// <summary>Patches shipped with this build that are not in the user's folder yet.</summary>
+    public ObservableCollection<BundledItemViewModel> BundledPatches { get; } = new();
+
+    public bool HasBundledPatches => BundledPatches.Count > 0;
+
+    private BundledContentService Bundled { get; } = new();
+
+    public bool HasOnlineTool => Bundled.OnlineToolPath is not null;
 
     public bool HasPatches => Patches.Count > 0;
     public bool HasNoPatches => Patches.Count == 0;
@@ -164,6 +190,12 @@ public sealed class BuildVariantsViewModel : ObservableObject
             }
         }
 
+        BundledPatches.Clear();
+        foreach (var item in Bundled.ListPatches(service?.ListPatches() ?? Array.Empty<string>()))
+            BundledPatches.Add(new BundledItemViewModel { Item = item });
+
+        OnPropertyChanged(nameof(HasBundledPatches));
+        OnPropertyChanged(nameof(HasOnlineTool));
         OnPropertyChanged(nameof(HasPatches));
         OnPropertyChanged(nameof(HasNoPatches));
         OnPropertyChanged(nameof(BuildLinkIsJunction));
@@ -235,16 +267,30 @@ public sealed class BuildVariantsViewModel : ObservableObject
         var force = false;
         if (slot.HasDrift)
         {
+            var drifted = service.DetectDrift(slot.Patch, slot.Target);
+            var names = string.Join("\n", drifted.Take(8).Select(d => "  " + d.Path)) +
+                        (drifted.Count > 8 ? "\n  ..." : "");
+
             var answer = MessageBox.Show(
-                $"{slot.State.DriftCount} file(s) in the {where} have changed since '{slot.DisplayName}' was applied.\n\n" +
-                "That is usually a game update written over the patch, which makes those files newer " +
-                "than the copies kept when it was applied.\n\n" +
-                "Yes - put the old files back anyway.\n" +
+                $"{drifted.Count} file(s) in the {where} have changed since '{slot.DisplayName}' was applied:\n\n" +
+                names + "\n\n" +
+                "If the game rewrites these every launch - a config the fix keeps its settings in, say - " +
+                "they drift every time, and a file left behind means the patch never comes fully off." + 
+                "\n\n" +
+                "Yes - put the old files back, and remember these as expected to change." + "\n" +
                 "No - leave the changed ones and undo the rest.",
                 "Files have changed since", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
 
             if (answer == MessageBoxResult.Cancel) return;
             force = answer == MessageBoxResult.Yes;
+
+            // Remember only the settings files, and only ones still present. A
+            // missing file is not "expected to change", and a dll that moved is
+            // exactly what the drift check exists to catch.
+            if (force)
+                service.MarkVolatile(slot.Patch, drifted
+                    .Where(d => d.Actual != "missing" && PatchManifest.CanLearnAsVolatile(d.Path))
+                    .Select(d => d.Path));
         }
         else if (MessageBox.Show(
                      $"Take '{slot.DisplayName}' back off the {where}?\n\n" +
@@ -337,6 +383,70 @@ public sealed class BuildVariantsViewModel : ObservableObject
         {
             service.SetDisplayName(item.FolderName, entered);
             _shell.Report($"Renamed to '{entered.Trim()}'.");
+        });
+    }
+
+    /// <summary>Copy a bundled patch into the user's own folder, where it behaves like any other.</summary>
+    private void AddBundled(BundledItemViewModel? item)
+    {
+        var service = PatchEngine;
+        if (service is null || item is null) return;
+
+        RunPatchOperation(() =>
+        {
+            Bundled.Install(item.Name, service);
+            _shell.Report($"Added '{item.Name}' to your patches. Switch it on below when you want it.");
+        });
+    }
+
+    /// <summary>
+    /// Run the bundled modded-online patcher.
+    ///
+    /// It edits isaac-ng.exe itself rather than laying files over the folder, so
+    /// it is a tool we launch rather than a patch we apply — and because it is
+    /// outside the journal, the backup taken here is the only copy this app can
+    /// promise. It keeps its own .bak beside the exe as well.
+    /// </summary>
+    private void RunOnlineTool()
+    {
+        var tool = Bundled.OnlineToolPath;
+        var gameDir = _shell.Config?.GameDir;
+        if (tool is null || string.IsNullOrWhiteSpace(gameDir)) return;
+
+        var exe = Path.Combine(gameDir, "isaac-ng.exe");
+        if (!File.Exists(exe))
+        {
+            MessageBox.Show($"No isaac-ng.exe at:\n{gameDir}\n\nCheck the paths below.",
+                            "Modded online", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (MessageBox.Show(
+                "Open the modded-online patcher?\n\n" +
+                "It edits the game executable so mods can be used in online play. It is a separate " +
+                "tool that came with this app, not part of it, and it has its own window - this app " +
+                "cannot undo what it does from the patch list.\n\n" +
+                "Your isaac-ng.exe is copied aside first, so there is a copy to go back to.",
+                "Modded online", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        RunPatchOperation(() =>
+        {
+            if (_shell.Process.IsIsaacRunning())
+                throw new UnsafePathException("Isaac is running. Close it before patching the executable.");
+
+            var backupDir = Path.Combine(PatchEngine!.BackupRoot,
+                                         $"isaac-ng-{DateTime.Now:yyyyMMdd-HHmmss}");
+            Directory.CreateDirectory(backupDir);
+            File.Copy(exe, Path.Combine(backupDir, "isaac-ng.exe"), overwrite: false);
+
+            Process.Start(new ProcessStartInfo(tool)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(tool),
+            });
+
+            _shell.Report($"Backed up isaac-ng.exe to {Path.GetFileName(backupDir)} and opened the patcher.");
         });
     }
 

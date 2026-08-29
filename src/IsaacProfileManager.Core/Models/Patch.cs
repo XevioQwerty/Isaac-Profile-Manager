@@ -48,6 +48,64 @@ public sealed class PatchManifest
     /// </summary>
     [JsonPropertyName("Delete")]
     public List<string> Delete { get; set; } = new();
+
+    /// <summary>
+    /// Files this patch installs that are rewritten while the game runs, so a
+    /// change to them means nothing.
+    ///
+    /// Without this a config the fix rewrites on every launch looks exactly like
+    /// a game update written over the patch: the revert leaves it alone, a
+    /// skipped file means the patch is still partly applied, so the journal
+    /// stays and the patch can never be fully taken off. Observed with
+    /// <c>OnlineFix.ini</c>, which is rewritten at launch.
+    ///
+    /// Entries are relative paths, or <c>*.ext</c> to match by extension.
+    /// </summary>
+    [JsonPropertyName("Volatile")]
+    public List<string> Volatile { get; set; } = new();
+
+    /// <summary>
+    /// Always treated as volatile. Logs are written by whatever produced them
+    /// and are never the reason to hold on to a patch.
+    /// </summary>
+    public static readonly string[] AlwaysVolatile = { "*.log" };
+
+    /// <summary>
+    /// Extensions that may be <em>learned</em> as volatile from a drift prompt.
+    ///
+    /// Deliberately narrow. "Remember these as expected to change" is offered
+    /// after a revert finds drift, and the drifted set can easily include
+    /// binaries — another tool removing this patch's dlls looks identical to a
+    /// config being rewritten. Recording a dll as expected to change would
+    /// quietly disable the protection that stops a revert clobbering a newer
+    /// file, so only things that are plainly settings can be learned.
+    /// </summary>
+    public static readonly string[] LearnableVolatileExtensions =
+        { ".ini", ".cfg", ".conf", ".json", ".txt", ".log", ".xml", ".yml" };
+
+    public static bool CanLearnAsVolatile(string relativePath) =>
+        LearnableVolatileExtensions.Contains(System.IO.Path.GetExtension(relativePath),
+                                             StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether a change to this path should be ignored rather than reported.</summary>
+    public bool IsVolatile(string relativePath)
+    {
+        foreach (var pattern in Volatile.Concat(AlwaysVolatile))
+        {
+            if (string.IsNullOrWhiteSpace(pattern)) continue;
+
+            if (pattern.StartsWith("*.", StringComparison.Ordinal))
+            {
+                if (relativePath.EndsWith(pattern[1..], StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            else if (string.Equals(relativePath, pattern, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(System.IO.Path.GetFileName(relativePath), pattern, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 /// <summary>Where one patch stands against one of the two folders it can go over.</summary>
