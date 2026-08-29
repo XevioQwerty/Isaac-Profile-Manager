@@ -33,9 +33,9 @@
 
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
-                        <TextBlock Text="Capture current saves" Style="{StaticResource Heading}"/>
-                        <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                                   Text="Copies what is live right now into a new set. Read-only, so it is safe whatever Steam Cloud is doing."/>
+                        <TextBlock Text="New save set" Style="{StaticResource Heading}"/>
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Name it, then choose whether it starts from the save you have now or from nothing - separate unlock states for, say, vanilla online and vanilla solo."/>
                         <TextBlock Text="Name" Style="{StaticResource Dim}"/>
                         <TextBox Text="{Binding NewSetName, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,8"/>
                         <TextBlock Text="Players (comma separated)" Style="{StaticResource Dim}"/>
@@ -43,7 +43,17 @@
                         <TextBlock Text="Notes" Style="{StaticResource Dim}"/>
                         <TextBox Text="{Binding NewSetNotes, UpdateSourceTrigger=PropertyChanged}"
                                  AcceptsReturn="True" Height="52" TextWrapping="Wrap" Margin="0,2,0,10"/>
-                        <Button Content="Capture" Command="{Binding CaptureCommand}" HorizontalAlignment="Left"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <Button Content="Capture what is live" Command="{Binding CaptureCommand}"
+                                    Margin="0,0,8,0"/>
+                            <Button Content="Start a fresh save" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding StartFreshCommand}"/>
+                        </StackPanel>
+
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,4"
+                                   Text="Capture copies the live files into the set and changes nothing - safe whatever Steam Cloud is doing."/>
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap"
+                                   Text="Start a fresh save backs up the live files and clears them, so Isaac writes a new save next launch. The set stays empty until you come back and capture it."/>
                     </StackPanel>
                 </Border>
 
@@ -160,8 +170,24 @@
                             </StackPanel>
                         </Border>
 
-                        <Button Content="Load this save set" Style="{StaticResource PrimaryButton}"
-                                Command="{Binding ActivateCommand}" HorizontalAlignment="Left"/>
+                        <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                                CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                                Visibility="{Binding Selected.IsEmpty, Converter={StaticResource BoolToVisible}}">
+                            <StackPanel>
+                                <TextBlock Text="This set has no save in it yet" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <TextBlock TextWrapping="Wrap" Margin="0,0,0,8"
+                                           Text="Launch Isaac so it writes a fresh save, then capture it into this set. Until then there is nothing here to load."/>
+                                <Button Content="Capture the new save" Style="{StaticResource PrimaryButton}"
+                                        Command="{Binding CaptureIntoCommand}" HorizontalAlignment="Left"/>
+                            </StackPanel>
+                        </Border>
+
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Load this save set" Style="{StaticResource PrimaryButton}"
+                                    Command="{Binding ActivateCommand}" Margin="0,0,8,0"/>
+                            <Button Content="Re-capture into this set" Command="{Binding CaptureIntoCommand}"
+                                    ToolTip="Replace this set's files with whatever is live now."/>
+                        </StackPanel>
 
                         <TextBlock Style="{StaticResource Dim}" Margin="0,10,0,0"
                                    Text="Your current saves are backed up first. A set from the wrong build is blocked rather than warned about — loading a REPENTOGON-era save on retail can destroy every achievement."/>

@@ -223,6 +223,101 @@ public sealed class SaveSetService
     }
 
     /// <summary>
+    /// Start a save set with nothing in it, for a fresh game rather than a copy
+    /// of one you already have - "vanilla online" and "vanilla solo" as separate
+    /// unlock states, say.
+    ///
+    /// Activating an empty set clears the live save files and puts nothing back,
+    /// and Isaac writes a new save on the next launch. Verified 2026-08-17 that
+    /// emptying the folder does not trigger a Cloud restore on this install: the
+    /// game produced a fresh 4,068-byte persistentgamedata1.dat and Steam
+    /// rewrote remotecache.vdf from local disk.
+    ///
+    /// The build has to be given rather than derived, because there are no files
+    /// to derive it from and a set with no build is refused at activation - the
+    /// cross-build check is what stops a J273 save being opened on retail.
+    /// </summary>
+    public SaveSet CreateEmpty(string name, GameBuild build, string modProfile,
+                               IEnumerable<string>? players = null, string notes = "")
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new ArgumentException($"'{name}' is not usable as a folder name.", nameof(name));
+        if (build == GameBuild.Unknown)
+            throw new ArgumentException("A new save set needs a build; it cannot be worked out from an empty folder.", nameof(build));
+
+        var destination = Path.Combine(SetsRoot, name);
+        if (Directory.Exists(destination))
+            throw new UnsafePathException($"A save set called '{name}' already exists.");
+
+        Directory.CreateDirectory(destination);
+
+        var set = new SaveSet
+        {
+            Name = name,
+            Build = build,
+            ModProfile = modProfile,
+            Players = players?.ToList() ?? new List<string>(),
+            Notes = notes,
+            Files = new List<string>(),
+            Slots = new List<int>(),
+            Sha1 = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+            CapturedUtc = DateTime.UtcNow.ToString("o"),
+        };
+
+        SaveSetMetadata(set);
+        return set;
+    }
+
+    /// <summary>
+    /// Copy whatever is live now into a set that already exists - the second half
+    /// of starting a fresh save, once the game has generated one.
+    ///
+    /// The recorded build is left alone. The files are what the chosen build
+    /// produced, so re-deriving it could only ever agree or mean something went
+    /// wrong, and silently rewriting it would erase the check that protects the
+    /// achievements.
+    /// </summary>
+    public SaveSet CaptureInto(SaveSet set)
+    {
+        var folder = LiveFolder;
+        if (folder is null || !Directory.Exists(folder))
+            throw new UnsafePathException("Steam's save folder could not be found.");
+
+        var destination = Path.Combine(SetsRoot, set.Name);
+        if (!Directory.Exists(destination))
+            throw new UnsafePathException($"Save set folder is missing: {destination}");
+
+        var live = ReadLive();
+        if (live.Count == 0)
+            throw new UnsafePathException($"No save files found in {folder}. Launch the game once so it writes one.");
+
+        var found = BuildOf(live.Select(f => f.FileName));
+        if (set.Build != GameBuild.Both && found != GameBuild.Both && found != set.Build)
+            throw new UnsafePathException(
+                $"'{set.Name}' is a {set.BuildText} set, but the live folder holds {found} saves. " +
+                "Capturing them would make the set lie about which build it came from.");
+
+        // Replace rather than merge: a leftover file from an earlier capture
+        // would travel with the set and be restored over a save it predates.
+        foreach (var stale in new DirectoryInfo(destination).GetFiles())
+        {
+            if (stale.Name.Equals(MetadataFileName, StringComparison.OrdinalIgnoreCase)) continue;
+            stale.Delete();
+        }
+
+        foreach (var file in live)
+            File.Copy(Path.Combine(folder, file.FileName), Path.Combine(destination, file.FileName), overwrite: true);
+
+        set.Files = live.Select(f => f.FileName).ToList();
+        set.Slots = SlotsOf(live.Select(f => f.FileName)).ToList();
+        set.Sha1 = live.ToDictionary(f => f.FileName, f => f.Sha1, StringComparer.OrdinalIgnoreCase);
+        set.CapturedUtc = DateTime.UtcNow.ToString("o");
+
+        SaveSetMetadata(set);
+        return set;
+    }
+
+    /// <summary>
     /// Update the descriptive fields of an existing set. Never touches the save
     /// files, the recorded build, or the hashes — those describe what was
     /// captured and editing them would make the set lie about itself.

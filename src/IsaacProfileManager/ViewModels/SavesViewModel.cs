@@ -18,7 +18,12 @@ public sealed class SaveSetViewModel
     public string PlayersText => Set.Players.Count > 0 ? string.Join(", ", Set.Players) : "(nobody recorded)";
     public string SlotsText => Set.Slots.Count > 0 ? $"slots {string.Join(", ", Set.Slots)}" : "no slots";
     public string Notes => Set.Notes;
-    public string FilesText => string.Join("\n", Set.Files);
+    public string FilesText => Set.Files.Count == 0
+        ? "(no save captured yet)"
+        : string.Join("\n", Set.Files);
+
+    /// <summary>Created but never filled: the game has not written its save yet.</summary>
+    public bool IsEmpty => Set.Files.Count == 0;
 
     public string CapturedText => DateTime.TryParse(Set.CapturedUtc, out var d)
         ? d.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : Set.CapturedUtc;
@@ -73,7 +78,15 @@ public sealed class SavesViewModel : ObservableObject
         TurnCloudOffCommand = new RelayCommand(TurnCloudOff, () => !SteamCloudService.IsSteamRunning());
         SaveEditsCommand = new RelayCommand(SaveEdits, () => Selected is not null && EditName.Trim().Length > 0);
         DeleteSetCommand = new RelayCommand(DeleteSet, () => Selected is not null);
+        StartFreshCommand = new RelayCommand(StartFresh, () => Service is not null && NewSetName.Trim().Length > 0);
+        CaptureIntoCommand = new RelayCommand(CaptureInto, () => Selected is not null);
     }
+
+    /// <summary>Begin a save set with no save in it, for a fresh unlock state.</summary>
+    public RelayCommand StartFreshCommand { get; }
+
+    /// <summary>Adopt whatever the game has since written into the selected set.</summary>
+    public RelayCommand CaptureIntoCommand { get; }
 
     public RelayCommand SaveEditsCommand { get; }
     public RelayCommand DeleteSetCommand { get; }
@@ -390,6 +403,83 @@ public sealed class SavesViewModel : ObservableObject
             NewSetName = string.Empty;
             NewSetPlayers = string.Empty;
             NewSetNotes = string.Empty;
+        });
+    }
+
+    /// <summary>
+    /// Make an empty set and switch to it, so the next launch generates a new
+    /// save rather than reusing the one that is live now.
+    ///
+    /// Two steps rather than one because Isaac writes the save, not us: this
+    /// clears the folder, and the set stays empty until the game has run and
+    /// the files are captured back into it.
+    /// </summary>
+    private void StartFresh()
+    {
+        var service = Service;
+        if (service is null) return;
+
+        var build = SelectedBuild;
+        if (build == GameBuild.Unknown)
+        {
+            MessageBox.Show(
+                "The launcher is not set to a build right now, so a new set cannot record which " +
+                "build its save will belong to. Pick a build on the Build tab first.",
+                "New save set", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var buildName = build == GameBuild.Repentogon ? "REPENTOGON" : "vanilla";
+        var name = NewSetName.Trim();
+
+        if (MessageBox.Show(
+                $"Start '{name}' as a brand-new {buildName} save?\n\n" +
+                "Your current save files are backed up and then cleared out of Steam's folder, so " +
+                "Isaac writes a fresh one the next time it starts. Nothing is deleted - the backup " +
+                "is kept, and any save set you already made is untouched.\n\n" +
+                "Launch the game, get to the menu, then come back and press " +
+                "\"Capture the new save\" to fill this set in.",
+                "New save set", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        var activeProfile = _shell.Config is null
+            ? string.Empty
+            : _shell.ModProfileService.GetActiveProfileFromDisk(_shell.Config) ?? _shell.Config.ActiveProfile ?? string.Empty;
+
+        Run(() =>
+        {
+            var players = NewSetPlayers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var set = service.CreateEmpty(name, build, activeProfile, players, NewSetNotes.Trim());
+            var backup = service.Activate(set, build, CloudAcknowledged);
+
+            _shell.Report($"'{set.Name}' is empty and live saves are cleared - launch Isaac, then capture. " +
+                          $"Previous saves backed up to {Path.GetFileName(backup)}.");
+            NewSetName = string.Empty;
+            NewSetPlayers = string.Empty;
+            NewSetNotes = string.Empty;
+        });
+    }
+
+    /// <summary>Copy the live saves into the set that is already selected.</summary>
+    private void CaptureInto()
+    {
+        var service = Service;
+        if (service is null || Selected is null) return;
+
+        var set = Selected.Set;
+        var replacing = set.Files.Count > 0;
+
+        if (replacing && MessageBox.Show(
+                $"'{set.Name}' already holds {set.Files.Count} file(s).\n\n" +
+                "Replace them with what is live now? The set will describe the current save instead " +
+                "of the one it was captured from.",
+                "Capture into set", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        Run(() =>
+        {
+            var filled = service.CaptureInto(set);
+            _shell.Report($"Captured into '{filled.Name}' - {filled.Files.Count} files, {filled.SlotsText()}.");
         });
     }
 
