@@ -254,10 +254,33 @@ public sealed class ModProfilesViewModel : ObservableObject
         if (_shell.Config is null) return;
         var seed = SeedFrom is null or EmptySeed ? null : SeedFrom;
 
+        // Seeding from a profile you have been switching mods off in is the
+        // usual way a bisect ends: the answer is a set minus the mods that
+        // caused it, and that set deserves to become its own profile.
+        var seedDisabled = true;
+        if (seed is not null)
+        {
+            var off = _shell.ModProfileService.DisabledMods(_shell.Config, seed);
+            if (off.Count > 0)
+            {
+                var answer = MessageBox.Show(
+                    $"'{seed}' has {off.Count} mod(s) switched off:\n\n" +
+                    string.Join("\n", off.Select(m => "  " + m)) + "\n\n" +
+                    $"Leave them out of '{NewProfileName.Trim()}' entirely?\n\n" +
+                    "Yes - the new profile does not contain them at all.\n" +
+                    "No - it contains them, still switched off.",
+                    "Mods switched off in the source", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+
+                if (answer == MessageBoxResult.Cancel) return;
+                seedDisabled = answer == MessageBoxResult.No;
+            }
+        }
+
         Run(() =>
         {
-            _shell.ModProfileService.Add(_shell.Config!, NewProfileName.Trim(), seed);
-            _shell.Report($"Created profile '{NewProfileName.Trim()}'" + (seed is null ? "" : $" seeded from '{seed}'"));
+            var name = NewProfileName.Trim();
+            _shell.ModProfileService.Add(_shell.Config!, name, seed, seedDisabled);
+            _shell.Report($"Created profile '{name}'" + (seed is null ? "" : $" seeded from '{seed}'"));
             NewProfileName = string.Empty;
             SeedFrom = EmptySeed;
         });

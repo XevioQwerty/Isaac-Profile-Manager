@@ -176,7 +176,7 @@
 
                             <StackPanel Visibility="{Binding HasLibrary, Converter={StaticResource BoolToVisible}}">
                                 <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                                           Text="Ticked mods are linked into the profile from the shared library. Nothing is copied, so a mod costs disk once no matter how many profiles use it."/>
+                                           Text="Ticked mods are linked into the profile from the shared library. Nothing is copied, so a mod costs disk once no matter how many profiles use it. Tick &quot;off&quot; to keep a mod in the profile but stop Isaac loading it - useful for bisecting a desync."/>
 
                                 <!-- Migration prompt for profiles that predate the library -->
                                 <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
@@ -195,6 +195,19 @@
                                         </ScrollViewer>
                                         <Button Content="Convert them to library links"
                                                 Command="{Binding AdoptCommand}" HorizontalAlignment="Left"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Mods switched off from the in-game menu, which activation would wipe -->
+                                <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                                        CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                                        Visibility="{Binding HasMarkedDisabled, Converter={StaticResource BoolToVisible}}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding MarkedDisabledText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                                   Text="Those markers sit in the shared library, so they switch these mods off in every profile - and activating any profile deletes them, so the choice is lost at the next switch. Making it a profile setting keeps it."/>
+                                        <Button Content="Switch them off in this profile"
+                                                Command="{Binding AdoptMarkedDisabledCommand}" HorizontalAlignment="Left"/>
                                     </StackPanel>
                                 </Border>
 
@@ -218,6 +231,7 @@
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                     <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
 
                                                 <CheckBox Grid.Column="0" IsChecked="{Binding Included}"
@@ -228,11 +242,24 @@
                                                        Source="{Binding PreviewPath, Converter={StaticResource PathToImage}}"/>
 
                                                 <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
-                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <Border Background="{StaticResource WarnBrush}" CornerRadius="3"
+                                                                Padding="5,1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                                Visibility="{Binding StateText, Converter={StaticResource StringToVisible}}">
+                                                            <TextBlock Text="{Binding StateText}" FontSize="10"
+                                                                       FontWeight="Bold" Foreground="White"/>
+                                                        </Border>
+                                                    </StackPanel>
                                                     <TextBlock Text="{Binding SubtitleText}" Style="{StaticResource Mono}"
                                                                Visibility="{Binding SubtitleText, Converter={StaticResource StringToVisible}}"/>
                                                 </StackPanel>
+
+                                                <CheckBox Grid.Column="3" Content="off" IsChecked="{Binding Disabled}"
+                                                          IsEnabled="{Binding Included}" VerticalAlignment="Center"
+                                                          Margin="10,0,0,0"
+                                                          ToolTip="In the profile, but not linked into the folder Isaac reads. The profile still remembers it."/>
                                             </Grid>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -240,7 +267,9 @@
 
                                 <StackPanel Orientation="Horizontal">
                                     <Button Content="Apply to profile" Style="{StaticResource PrimaryButton}"
-                                            Command="{Binding ApplyCommand}" Margin="0,0,12,0"/>
+                                            Command="{Binding ApplyCommand}" Margin="0,0,8,0"/>
+                                    <Button Content="Turn all back on" Command="{Binding EnableAllCommand}"
+                                            Margin="0,0,12,0"/>
                                     <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}"
                                                VerticalAlignment="Center"/>
                                 </StackPanel>

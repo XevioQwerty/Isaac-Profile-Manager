@@ -22,6 +22,30 @@ public sealed class ProfileManifest
 
     [JsonPropertyName("Notes")]
     public string Notes { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Members of the profile that are switched off: still listed, still part of
+    /// what the profile means, but not linked into the folder Isaac reads.
+    ///
+    /// Disabling this way rather than with a <c>disable.it</c> marker is
+    /// deliberate. A profile is built from junctions, so a marker written inside
+    /// a mod folder lands in the shared library and switches that mod off in
+    /// every profile linking it — and activation sweeps markers anyway, so one
+    /// would not survive a switch. Keeping the membership here means the profile
+    /// remembers the mod, and re-enabling is a re-link rather than a re-import.
+    ///
+    /// Added after the fact, so it stays at SchemaVersion 1: a build that
+    /// predates it ignores the key and materialises those mods, which is the old
+    /// behaviour rather than a failure.
+    /// </summary>
+    [JsonPropertyName("Disabled")]
+    public List<string> Disabled { get; set; } = new();
+
+    /// <summary>Members that will actually be linked into the profile folder.</summary>
+    public IEnumerable<string> EnabledMods =>
+        Mods.Where(m => !Disabled.Contains(m, StringComparer.OrdinalIgnoreCase));
+
+    public bool IsDisabled(string entry) => Disabled.Contains(entry, StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>Outcome of reconciling a profile folder against its manifest.</summary>
@@ -395,7 +419,10 @@ public sealed class ModLibraryService
         var missing = new List<string>();
         var leftAlone = new List<string>();
 
-        var wanted = manifest.Mods
+        // Disabled members are deliberately absent from `wanted`: they are not
+        // linked here, and the sweep below removes a link left from when they
+        // were on. The manifest still lists them, so the profile remembers.
+        var wanted = manifest.EnabledMods
             .Where(m => !string.IsNullOrWhiteSpace(m))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 

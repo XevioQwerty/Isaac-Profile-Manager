@@ -36,11 +36,37 @@ public sealed record ProfileRemoval(
     }
 }
 
+/// <summary>What switching mods off or back on actually did on disk.</summary>
+public sealed record DisableResult(
+    string ProfileName,
+    IReadOnlyList<string> Changed,
+    int LinksRemoved,
+    int LinksCreated,
+    int MarkersCleared)
+{
+    public string Summary
+    {
+        get
+        {
+            if (Changed.Count == 0) return "Nothing to change.";
+            var parts = new List<string>();
+            if (LinksRemoved > 0) parts.Add($"{LinksRemoved} folder(s) unlinked");
+            if (LinksCreated > 0) parts.Add($"{LinksCreated} folder(s) linked back");
+            if (MarkersCleared > 0) parts.Add($"{MarkersCleared} stale disable.it cleared from the library");
+            var detail = parts.Count > 0 ? " — " + string.Join(", ", parts) : "";
+            return $"{Changed.Count} mod(s) in '{ProfileName}'{detail}.";
+        }
+    }
+}
+
 public interface IModProfileService
 {
     IReadOnlyList<ModProfile> List(AppConfig config);
     ActivationResult Activate(AppConfig config, string name);
-    void Add(AppConfig config, string name, string? seedFromProfile = null);
+    void Add(AppConfig config, string name, string? seedFromProfile = null, bool seedDisabled = true);
+    DisableResult SetDisabled(AppConfig config, string name, IEnumerable<string> entries, bool disabled);
+    IReadOnlyList<string> DisabledMods(AppConfig config, string name);
+    IReadOnlyList<string> FindMarkedDisabled(AppConfig config, string name);
     ProfileRemoval Remove(AppConfig config, string name, bool deleteFolder = true);
     string? GetActiveProfileFromDisk(AppConfig config);
 }
@@ -67,13 +93,24 @@ public sealed class ModProfileService : IModProfileService
     {
         var active = GetActiveProfileFromDisk(config) ?? config.ActiveProfile;
         var result = new List<ModProfile>(config.Profiles.Count);
+        var library = LibraryFor(config);
+        var manifests = library?.ListManifests().ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         foreach (var name in config.Profiles)
         {
             var path = ProfilePath(config, name);
             var exists = Directory.Exists(path);
             var mods = exists ? Directory.GetDirectories(path).Length : 0;
+
+            // Two ways a mod can be off: switched off here, which unlinks the
+            // folder, or carrying a stale marker from the in-game menu. The
+            // first is the profile's own record, the second is on disk.
             var disabled = exists ? CountDisabled(path) : 0;
+            if (library is not null && manifests?.Contains(name) == true)
+            {
+                try { disabled += library.LoadManifest(name).Disabled.Count; }
+                catch (ConfigSchemaMismatchException) { /* reported where the manifest is opened */ }
+            }
 
             result.Add(new ModProfile
             {
@@ -170,6 +207,101 @@ public sealed class ModProfileService : IModProfileService
         return library.Materialise(name, manifest);
     }
 
+    /// <summary>
+    /// Library entries in a profile folder carrying a <c>disable.it</c> marker —
+    /// i.e. mods switched off from the in-game mod menu since the last switch.
+    ///
+    /// These are the ones worth converting into a proper profile-level disable:
+    /// the marker itself sits in the shared library and activation deletes it, so
+    /// as it stands the choice is both too broad and about to be lost.
+    /// </summary>
+    public IReadOnlyList<string> FindMarkedDisabled(AppConfig config, string name)
+    {
+        var dir = ProfilePath(config, name);
+        if (!Directory.Exists(dir)) return Array.Empty<string>();
+
+        var found = new List<string>();
+        foreach (var modDir in Directory.GetDirectories(dir))
+        {
+            if (File.Exists(Path.Combine(modDir, DisableMarker)))
+                found.Add(Path.GetFileName(modDir));
+        }
+        return found;
+    }
+
+    /// <summary>Members of a profile that are currently switched off.</summary>
+    public IReadOnlyList<string> DisabledMods(AppConfig config, string name)
+    {
+        var library = LibraryFor(config);
+        if (library is null) return Array.Empty<string>();
+        if (!library.ListManifests().Contains(name, StringComparer.OrdinalIgnoreCase)) return Array.Empty<string>();
+
+        return library.LoadManifest(name).Disabled
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Switch mods off (or back on) inside one profile.
+    ///
+    /// Off means the junction leaves the profile folder so Isaac cannot load the
+    /// mod, while the manifest goes on listing it. That keeps a debugging pass
+    /// reversible — the profile still knows what it is meant to contain, and
+    /// turning a mod back on is a re-link, not a re-import.
+    ///
+    /// A <c>disable.it</c> marker is not used and is actively cleaned up here:
+    /// it would be written through the junction into the shared library and
+    /// silently disable that mod in every other profile linking it, and
+    /// activation deletes markers anyway so it would not survive a switch.
+    /// </summary>
+    public DisableResult SetDisabled(AppConfig config, string name, IEnumerable<string> entries, bool disabled)
+    {
+        if (!config.Profiles.Contains(name, StringComparer.OrdinalIgnoreCase))
+            throw new ArgumentException($"Unknown profile '{name}'.", nameof(name));
+
+        var library = LibraryFor(config)
+            ?? throw new InvalidOperationException("Config has no SyncRoot. Re-run setup.");
+
+        var manifest = library.LoadManifest(name);
+        var wanted = entries.Where(e => !string.IsNullOrWhiteSpace(e))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+        var changed = new List<string>();
+        foreach (var entry in wanted)
+        {
+            var already = manifest.IsDisabled(entry);
+            if (already == disabled) continue;
+
+            if (disabled)
+            {
+                // Only a member can be switched off; anything else is a no-op
+                // rather than a silent new membership.
+                if (!manifest.Mods.Contains(entry, StringComparer.OrdinalIgnoreCase)) continue;
+                manifest.Disabled.Add(entry);
+            }
+            else
+            {
+                manifest.Disabled.RemoveAll(d => string.Equals(d, entry, StringComparison.OrdinalIgnoreCase));
+            }
+            changed.Add(entry);
+        }
+
+        if (changed.Count == 0)
+            return new DisableResult(name, changed, 0, 0, 0);
+
+        library.SaveManifest(name, manifest);
+
+        // A marker inside the library entry would outlive this profile's choice
+        // and affect every other one, so clear it while we are here.
+        var cleared = 0;
+        foreach (var entry in changed)
+            cleared += ClearDisableMarkers(Path.Combine(library.LibraryRoot, entry));
+
+        var report = library.Materialise(name, manifest);
+        return new DisableResult(name, changed, report.Removed.Count, report.Created.Count, cleared);
+    }
+
     // --- Profiles that arrived from somewhere else --------------------------
 
     /// <summary>
@@ -245,7 +377,20 @@ public sealed class ModProfileService : IModProfileService
         return (name, RegisterProfile(config, name), missing);
     }
 
-    public void Add(AppConfig config, string name, string? seedFromProfile = null)
+    /// <summary>
+    /// Create a profile, optionally seeded from an existing one.
+    ///
+    /// Seeding copies the source's <em>membership</em>, not its bytes. A profile
+    /// built from the library is entirely junctions, so the old behaviour — copy
+    /// real folders, skip reparse points — copied nothing at all and produced an
+    /// empty profile with an empty contents list. The manifest is what a profile
+    /// is; the folder is only its materialisation.
+    ///
+    /// <paramref name="seedDisabled"/> false drops the source's switched-off mods
+    /// entirely rather than carrying them across as switched off, which is the
+    /// "give me this profile without the mods I just disabled" case.
+    /// </summary>
+    public void Add(AppConfig config, string name, string? seedFromProfile = null, bool seedDisabled = true)
     {
         if (!IsValidProfileName(name))
             throw new ArgumentException($"'{name}' is not usable as a folder name.", nameof(name));
@@ -263,9 +408,36 @@ public sealed class ModProfileService : IModProfileService
             if (!Directory.Exists(source))
                 throw new UnsafePathException($"Cannot seed from '{seedFromProfile}' — folder not found: {source}");
 
+            var library = LibraryFor(config);
+
+            // 1. The membership. This is what makes the new profile contain the
+            //    same mods and show them in the contents list straight away.
+            if (library is not null &&
+                library.ListManifests().Contains(seedFromProfile, StringComparer.OrdinalIgnoreCase))
+            {
+                var from = library.LoadManifest(seedFromProfile);
+
+                var copy = new ProfileManifest { Notes = from.Notes };
+                if (seedDisabled)
+                {
+                    copy.Mods = from.Mods.ToList();
+                    copy.Disabled = from.Disabled.ToList();
+                }
+                else
+                {
+                    copy.Mods = from.EnabledMods.ToList();
+                }
+
+                library.SaveManifest(name, copy);
+                library.Materialise(name, copy);
+            }
+
+            // 2. Real folders the library does not own — a hand-installed mod
+            //    has no other copy, so it is copied rather than linked.
             foreach (var modDir in new DirectoryInfo(source).GetDirectories())
             {
                 if ((modDir.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if (Directory.Exists(Path.Combine(dir, modDir.Name))) continue;
                 DirectoryCopier.Copy(modDir.FullName, Path.Combine(dir, modDir.Name));
             }
             ClearDisableMarkers(dir);
