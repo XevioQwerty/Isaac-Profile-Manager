@@ -734,7 +734,13 @@ public sealed class LibraryViewModel : ObservableObject
               (orphans > 0 ? $"  ·  {orphans} in no profile" : "")
             : "The library is empty. Import mods on the Workshop tab, or adopt an existing profile's folders from the Mod profiles tab.";
 
-        _targetProfile = previousProfile is not null && Profiles.Contains(previousProfile) ? previousProfile : null;
+        // Default to the profile that is actually active. Leaving it null meant
+        // arriving at a list where every switch reads off, whatever the mods are
+        // really in, and no clue that a profile has to be picked first.
+        _targetProfile = previousProfile is not null && Profiles.Contains(previousProfile)
+            ? previousProfile
+            : Profiles.FirstOrDefault(p => string.Equals(p, config.ActiveProfile, StringComparison.OrdinalIgnoreCase))
+              ?? Profiles.FirstOrDefault();
         OnPropertyChanged(nameof(TargetProfile));
         LoadTicks();
 

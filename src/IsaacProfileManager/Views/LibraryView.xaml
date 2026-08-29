@@ -9,25 +9,73 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Header: what the library holds, and which profile is being built -->
-        <Border Grid.Row="0" Style="{StaticResource Card}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+        <!-- Toolbar: everything you reach for often, on one line above the list -->
+        <Border Grid.Row="0" Style="{StaticResource Card}" Margin="0,0,0,10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0">
-                    <TextBlock Text="Mod library" Style="{StaticResource Heading}"/>
+                    <TextBox Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0"
+                             Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="Filter the library by name"/>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"
+                                Margin="0,0,10,0">
+                        <TextBlock Text="Building" Style="{StaticResource Dim}" VerticalAlignment="Center"
+                                   Margin="0,0,6,0"/>
+                        <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding TargetProfile}"
+                                  MinWidth="170"
+                                  ToolTip="The profile the switches on this list add to and remove from"/>
+                    </StackPanel>
+
+                    <CheckBox Grid.Column="2" Content="In profile only" IsChecked="{Binding ShowOnlyIncluded}"
+                              VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                    <Button Grid.Column="3" Content="Apply to profile" Style="{StaticResource PrimaryButton}"
+                            Command="{Binding ApplyCommand}" Margin="0,0,8,0"/>
+
+                    <Button Grid.Column="4" Content="..." MinWidth="38" Padding="10,7"
+                            Click="OnOverflowClick" ToolTip="Sharing, updates and verification">
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Check for Workshop updates" Command="{Binding CheckUpdatesCommand}"/>
+                                <MenuItem Header="Update everything stale" Command="{Binding UpdateStaleCommand}"/>
+                                <MenuItem Header="Update the selected mod" Command="{Binding UpdateSelectedCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Copy a share code for this profile" Command="{Binding ShareProfileCommand}"/>
+                                <MenuItem Header="Copy a share code for the whole library" Command="{Binding ShareLibraryCommand}"/>
+                                <MenuItem Header="Import a share code..." Command="{Binding ImportShareCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Record hashes" Command="{Binding RecordHashesCommand}"/>
+                                <MenuItem Header="Verify library against them" Command="{Binding VerifyCommand}"/>
+                                <MenuItem Header="Export this profile..." Command="{Binding ExportProfileCommand}"/>
+                                <MenuItem Header="Compare with an export..." Command="{Binding CompareCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Switch on everything shown" Command="{Binding IncludeAllCommand}"/>
+                                <MenuItem Header="Switch off everything shown" Command="{Binding IncludeNoneCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Open the library folder" Command="{Binding OpenLibraryCommand}"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
+                </Grid>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                     <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Dim}"/>
-                    <TextBlock Text="{Binding LibraryPathText}" Style="{StaticResource Mono}" Margin="0,4,0,0"/>
+                    <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}" Margin="14,0,0,0"/>
+                    <TextBlock Text="{Binding UpdateProgress}" Style="{StaticResource Mono}" Margin="14,0,0,0"/>
+                    <TextBlock Text="{Binding HashProgress}" Style="{StaticResource Mono}" Margin="14,0,0,0"/>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock Text="Building profile" Style="{StaticResource Dim}" Margin="0,0,0,4"/>
-                    <ComboBox ItemsSource="{Binding Profiles}" SelectedItem="{Binding TargetProfile}" MinWidth="200"/>
-                </StackPanel>
-            </Grid>
+                <TextBlock Text="{Binding UpdateSummary}" Margin="0,6,0,0" TextWrapping="Wrap"
+                           Visibility="{Binding UpdateSummary, Converter={StaticResource StringToVisible}}"/>
+            </StackPanel>
         </Border>
 
         <!-- Browser -->
@@ -39,22 +87,10 @@
 
             <Grid Grid.Column="0" Margin="0,0,14,12">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0" Margin="0,0,0,8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox Grid.Column="0" Margin="0,0,8,0"
-                             Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"/>
-                    <CheckBox Grid.Column="1" Content="Only ticked" IsChecked="{Binding ShowOnlyIncluded}"
-                              VerticalAlignment="Center"/>
-                </Grid>
-
-                <ListBox Grid.Row="1" ItemsSource="{Binding View}" SelectedItem="{Binding Selected}"
+                <ListBox Grid.Row="0" ItemsSource="{Binding View}" SelectedItem="{Binding Selected}"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
@@ -65,8 +101,10 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
-                                <CheckBox Grid.Column="0" IsChecked="{Binding InProfile}"
-                                          VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <ToggleButton Grid.Column="0" Style="{StaticResource SwitchToggle}"
+                                              IsChecked="{Binding InProfile}"
+                                              VerticalAlignment="Center" Margin="0,0,12,0"
+                                              ToolTip="On means this mod is in the profile named in Building"/>
 
                                 <Border Grid.Column="1" Width="60" Height="60" Margin="0,0,12,0"
                                         Background="#121216" CornerRadius="4">
@@ -149,72 +187,22 @@
             </StackPanel>
         </Border>
 
-        <!-- Actions -->
+        <!-- Whatever the last verify or compare had to say -->
         <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0"
-                Visibility="{Binding HasLibrary, Converter={StaticResource BoolToVisible}}">
+                Visibility="{Binding HasReport, Converter={StaticResource BoolToVisible}}">
             <StackPanel>
-                <TextBlock Text="{Binding TargetProfileText}" Style="{StaticResource Dim}" Margin="0,0,0,10"/>
-                <WrapPanel>
-                    <Button Content="Apply to profile" Style="{StaticResource PrimaryButton}"
-                            Command="{Binding ApplyCommand}" Margin="0,0,12,8"/>
-                    <Button Content="Tick all shown" Command="{Binding IncludeAllCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Untick all shown" Command="{Binding IncludeNoneCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Open library folder" Command="{Binding OpenLibraryCommand}" Margin="0,0,12,8"/>
-                    <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,0,8"/>
-                </WrapPanel>
-
-                <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
-
-                <TextBlock Text="Sending a set to someone" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
-                <WrapPanel>
-                    <Button Content="Copy a code for this profile" Command="{Binding ShareProfileCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Copy a code for the whole library" Command="{Binding ShareLibraryCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Import a code..." Command="{Binding ImportShareCommand}" Margin="0,0,8,8"/>
-                </WrapPanel>
-                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8" TextWrapping="Wrap"
-                           Text="A share code is one string holding the Workshop ids, names and hashes for a set. Whoever you send it to pastes it into Import and the app downloads the whole set for them — no folder to copy. It is a few thousand characters, so send it as a message or a file rather than reading it out. Import also accepts a Steam collection id, which is short but carries no hashes."/>
-
-                <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
-
-                <TextBlock Text="Keeping up with the Workshop" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
-                <WrapPanel>
-                    <Button Content="Check for updates" Command="{Binding CheckUpdatesCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Update everything stale" Command="{Binding UpdateStaleCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Update the selected mod" Command="{Binding UpdateSelectedCommand}" Margin="0,0,8,8"/>
-                    <TextBlock Text="{Binding UpdateProgress}" Style="{StaticResource Mono}"
-                               VerticalAlignment="Center" Margin="0,0,0,8"/>
-                </WrapPanel>
-                <TextBlock Text="{Binding UpdateSummary}" Margin="0,0,0,6"
-                           Visibility="{Binding UpdateSummary, Converter={StaticResource StringToVisible}}"/>
-                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8" TextWrapping="Wrap"
-                           Text="Library mods are detached from Steam, so they never receive updates on their own. Checking costs nothing and needs no subscription. Updating resubscribes to just the mods that changed, takes the new files, and unsubscribes again — Steam must be running and Isaac must be closed."/>
-
-                <Separator Margin="0,4,0,10" Background="{StaticResource Border}"/>
-
-                <TextBlock Text="Proving two people match" Style="{StaticResource Dim}" Margin="0,0,0,6"/>
-                <WrapPanel>
-                    <Button Content="Record hashes" Command="{Binding RecordHashesCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Verify library" Command="{Binding VerifyCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Export this profile..." Command="{Binding ExportProfileCommand}" Margin="0,0,8,8"/>
-                    <Button Content="Compare with an export..." Command="{Binding CompareCommand}" Margin="0,0,8,8"/>
-                    <TextBlock Text="{Binding HashProgress}" Style="{StaticResource Mono}" VerticalAlignment="Center" Margin="0,0,0,8"/>
-                </WrapPanel>
-                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                           Text="Same folder name with different files is a desync cause a folder listing cannot see. Hashing makes it one value to compare; the export is a small file to send someone."/>
-
-                <StackPanel Visibility="{Binding HasReport, Converter={StaticResource BoolToVisible}}">
-                    <TextBlock Text="{Binding ReportTitle}" FontWeight="SemiBold" Margin="0,4,0,6"/>
-                    <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding Report}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}" Style="{StaticResource Mono}"/>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </StackPanel>
+                <TextBlock Text="{Binding ReportTitle}" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Report}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}" Style="{StaticResource Mono}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
             </StackPanel>
         </Border>
+
     </Grid>
 </UserControl>
