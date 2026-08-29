@@ -34,7 +34,11 @@ public sealed class PatchManifest
     [JsonPropertyName("Description")]
     public string Description { get; set; } = string.Empty;
 
-    /// <summary>Which folder this is laid over.</summary>
+    /// <summary>
+    /// Which folder this is normally laid over. A suggestion, not a
+    /// restriction: the same fix often has to go over the retail install and
+    /// the REPENTOGON build both, and they are applied and reverted separately.
+    /// </summary>
     [JsonPropertyName("Target")]
     public PatchTarget Target { get; set; } = PatchTarget.GameRoot;
 
@@ -46,6 +50,14 @@ public sealed class PatchManifest
     public List<string> Delete { get; set; } = new();
 }
 
+/// <summary>Where one patch stands against one of the two folders it can go over.</summary>
+public sealed record PatchTargetState(PatchTarget Target, bool IsApplied, string? AppliedUtc, int DriftCount)
+{
+    public string TargetText => Target == PatchTarget.GameRoot ? "retail install" : "REPENTOGON build";
+
+    public string ShortText => Target == PatchTarget.GameRoot ? "Retail" : "REPENTOGON";
+}
+
 /// <summary>A patch on disk, with whatever the folder and manifest say about it.</summary>
 public sealed record PatchInfo(
     string Name,
@@ -55,12 +67,14 @@ public sealed record PatchInfo(
     int FileCount,
     long SizeBytes,
     IReadOnlyList<string> Deletes,
-    bool IsApplied,
-    string? AppliedUtc)
+    IReadOnlyList<PatchTargetState> States)
 {
     public double SizeMb => Math.Round(SizeBytes / 1024d / 1024d, 1);
 
-    public string TargetText => Target == PatchTarget.GameRoot ? "game root" : "REPENTOGON folder";
+    public string TargetText => Target == PatchTarget.GameRoot ? "retail install" : "REPENTOGON build";
+
+    /// <summary>True when it is laid over at least one of the two folders.</summary>
+    public bool IsAppliedAnywhere => States.Any(t => t.IsApplied);
 
     public string SummaryText =>
         $"{FileCount} file(s), {SizeMb:N1} MB" + (Deletes.Count > 0 ? $", removes {Deletes.Count}" : "");

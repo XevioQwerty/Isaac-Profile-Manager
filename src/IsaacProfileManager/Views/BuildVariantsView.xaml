@@ -12,49 +12,61 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"/>
-                            <Border Background="{StaticResource Good}" CornerRadius="3" Padding="5,1"
-                                    Margin="8,0,0,0" VerticalAlignment="Center"
-                                    Visibility="{Binding StateText, Converter={StaticResource StringToVisible}}">
-                                <TextBlock Text="{Binding StateText}" FontSize="10" FontWeight="Bold"
-                                           Foreground="White"/>
-                            </Border>
-                        </StackPanel>
-
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"/>
                         <TextBlock Text="{Binding Description}" Style="{StaticResource Dim}" TextWrapping="Wrap"
-                                   Margin="0,3,12,0"
+                                   Margin="0,3,0,0"
                                    Visibility="{Binding Description, Converter={StaticResource StringToVisible}}"/>
                         <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Mono}" Margin="0,3,0,0"/>
-                        <TextBlock Text="{Binding AppliedText}" Style="{StaticResource Dim}" Margin="0,2,0,0"
-                                   Visibility="{Binding AppliedText, Converter={StaticResource StringToVisible}}"/>
 
-                        <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
-                                CornerRadius="3" Padding="8" Margin="0,8,12,0"
-                                Visibility="{Binding HasDrift, Converter={StaticResource BoolToVisible}}">
-                            <TextBlock Text="{Binding DriftText}" TextWrapping="Wrap" FontSize="12"/>
-                        </Border>
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <Button Content="Apply" Style="{StaticResource PrimaryButton}" MinWidth="86"
-                                Margin="0,0,0,6"
-                                Command="{Binding DataContext.ApplyPatchCommand,
-                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                CommandParameter="{Binding}"
-                                Visibility="{Binding IsApplied, Converter={StaticResource BoolToCollapsed}}"/>
-                        <Button Content="Revert" MinWidth="86" Margin="0,0,0,6"
-                                Command="{Binding DataContext.RevertPatchCommand,
-                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                CommandParameter="{Binding}"
-                                Visibility="{Binding IsApplied, Converter={StaticResource BoolToVisible}}"/>
-                        <Button Content="Remove" MinWidth="86"
+                        <Button Content="Remove" HorizontalAlignment="Left" Margin="0,8,0,0"
                                 Command="{Binding DataContext.RemovePatchCommand,
                                           RelativeSource={RelativeSource AncestorType=UserControl}}"
                                 CommandParameter="{Binding}"
-                                Visibility="{Binding IsApplied, Converter={StaticResource BoolToCollapsed}}"/>
+                                Visibility="{Binding CanRemove, Converter={StaticResource BoolToVisible}}"
+                                ToolTip="Delete this patch folder. The game is not touched."/>
                     </StackPanel>
+
+                    <!-- One slot per folder, applied and reverted independently -->
+                    <ItemsControl Grid.Column="1" ItemsSource="{Binding Slots}" MinWidth="230">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#121216" BorderBrush="{StaticResource Border}"
+                                        BorderThickness="1" CornerRadius="4" Padding="10,8" Margin="0,0,0,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
+                                                <Border Background="{StaticResource Good}" CornerRadius="3"
+                                                        Padding="4,0" Margin="6,0,0,0" VerticalAlignment="Center"
+                                                        Visibility="{Binding IsApplied, Converter={StaticResource BoolToVisible}}">
+                                                    <TextBlock Text="ON" FontSize="9" FontWeight="Bold" Foreground="White"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding AppliedText}" Style="{StaticResource Dim}"
+                                                       FontSize="11" Margin="0,2,0,0"/>
+                                            <TextBlock Text="{Binding DriftText}" FontSize="11" Margin="0,2,0,0"
+                                                       Foreground="{StaticResource WarnBrush}"
+                                                       Visibility="{Binding HasDrift, Converter={StaticResource BoolToVisible}}"/>
+                                        </StackPanel>
+
+                                        <ToggleButton Grid.Column="1" Style="{StaticResource SwitchToggle}"
+                                                      IsChecked="{Binding IsApplied, Mode=OneWay}"
+                                                      VerticalAlignment="Center"
+                                                      Command="{Binding DataContext.TogglePatchCommand,
+                                                                RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                      CommandParameter="{Binding}"
+                                                      ToolTip="On lays this patch over that folder. Off takes it back off and restores what it replaced."/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -98,28 +110,13 @@
                     </Grid>
 
                     <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,14"
-                               Text="A patch is an unzipped release laid over one of the game folders. Applying copies every file it replaces aside first and records what it did, so reverting puts the folder back exactly as it was. Nothing here keeps a second copy of the game."/>
+                               Text="A patch is an unzipped release laid over a game folder. Each patch can go over the retail install, the REPENTOGON build, or both at once - they are applied and reverted separately, and each keeps its own copies of what it replaced. Nothing here holds a second copy of the game."/>
 
                     <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,14"
                                Visibility="{Binding HasNoPatches, Converter={StaticResource BoolToVisible}}"
-                               Text="No patches yet. Unzip one anywhere, then press &quot;Add a patch...&quot; and say which folder it belongs over."/>
+                               Text="No patches yet. Unzip one anywhere, then press &quot;Add a patch...&quot; - you choose which folders to lay it over afterwards."/>
 
-                    <!-- Retail -->
-                    <StackPanel Visibility="{Binding HasRootPatches, Converter={StaticResource BoolToVisible}}"
-                                Margin="0,0,0,10">
-                        <TextBlock Text="Over the retail install" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                        <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                                   Text="The game folder Steam owns - isaac-ng.exe and the loose dlls beside it."/>
-                        <ItemsControl ItemsSource="{Binding RootPatches}" ItemTemplate="{StaticResource PatchRow}"/>
-                    </StackPanel>
-
-                    <!-- REPENTOGON -->
-                    <StackPanel Visibility="{Binding HasRepentogonPatches, Converter={StaticResource BoolToVisible}}">
-                        <TextBlock Text="Over the REPENTOGON build" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                        <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                                   Text="The subfolder the launcher loads the downgraded build from."/>
-                        <ItemsControl ItemsSource="{Binding RepentogonPatches}" ItemTemplate="{StaticResource PatchRow}"/>
-                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Patches}" ItemTemplate="{StaticResource PatchRow}"/>
                 </StackPanel>
             </Border>
 

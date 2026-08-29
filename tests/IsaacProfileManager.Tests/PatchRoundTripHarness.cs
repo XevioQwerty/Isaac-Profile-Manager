@@ -43,16 +43,16 @@ public class PatchRoundTripHarness
         var before = Snapshot(game);
         Assert.NotEmpty(before);
 
-        var result = service.Apply("onlinefix", game);
+        var result = service.Apply("onlinefix", PatchTarget.GameRoot, game);
 
         // It really did something: the exe is now the patched one.
         Assert.True(result.Changed >= 6, $"expected a real payload, got {result.Summary}");
         Assert.Empty(result.Skipped);
         Assert.NotEqual(before[@"isaac-ng.exe"], Snapshot(game)[@"isaac-ng.exe"]);
 
-        Assert.Empty(service.DetectDrift("onlinefix"));
+        Assert.Empty(service.DetectDrift("onlinefix", PatchTarget.GameRoot));
 
-        var reverted = service.Revert("onlinefix");
+        var reverted = service.Revert("onlinefix", PatchTarget.GameRoot);
         Assert.Empty(reverted.Skipped);
 
         var after = Snapshot(game);

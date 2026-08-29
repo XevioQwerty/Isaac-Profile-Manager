@@ -7,35 +7,44 @@ using IsaacProfileManager.Core.Services;
 
 namespace IsaacProfileManager.ViewModels;
 
-/// <summary>One patch as it appears in a target's list.</summary>
-public sealed class PatchItemViewModel : ObservableObject
+/// <summary>One patch against one of the two folders it can be laid over.</summary>
+public sealed class PatchSlotViewModel : ObservableObject
 {
-    public required PatchInfo Info { get; init; }
-    public required IReadOnlyList<PatchDrift> Drift { get; init; }
+    public required string Patch { get; init; }
+    public required PatchTargetState State { get; init; }
 
-    public string Name => Info.Name;
-    public string Description => Info.Description;
-    public string SummaryText => Info.SummaryText;
-    public bool IsApplied => Info.IsApplied;
+    public PatchTarget Target => State.Target;
+    public string Label => State.ShortText;
+    public bool IsApplied => State.IsApplied;
+    public string ActionText => State.IsApplied ? "Revert" : "Apply";
 
-    public string StateText => Info.IsApplied ? "APPLIED" : string.Empty;
+    public string AppliedText => State.AppliedUtc is not null && DateTime.TryParse(State.AppliedUtc, out var when)
+        ? $"on since {when.ToLocalTime():MMM d HH:mm}"
+        : "not applied";
 
-    public string AppliedText => Info.AppliedUtc is not null && DateTime.TryParse(Info.AppliedUtc, out var when)
-        ? $"applied {when.ToLocalTime():yyyy-MM-dd HH:mm}"
-        : string.Empty;
-
-    public bool HasDrift => Drift.Count > 0;
+    public bool HasDrift => State.DriftCount > 0;
 
     /// <summary>
     /// Something has written over the patch since it went on — a game update is
     /// the ordinary cause, and it means a plain revert would put an old file
     /// back over a newer one.
     /// </summary>
-    public string DriftText => Drift.Count == 0
+    public string DriftText => State.DriftCount == 0
         ? string.Empty
-        : $"{Drift.Count} file(s) changed since this was applied: " +
-          string.Join(", ", Drift.Take(4).Select(d => d.Path)) +
-          (Drift.Count > 4 ? ", ..." : "");
+        : $"{State.DriftCount} file(s) changed since";
+}
+
+/// <summary>One patch as it appears in the list, with a slot per folder.</summary>
+public sealed class PatchItemViewModel : ObservableObject
+{
+    public required PatchInfo Info { get; init; }
+    public required IReadOnlyList<PatchSlotViewModel> Slots { get; init; }
+
+    public string Name => Info.Name;
+    public string Description => Info.Description;
+    public string SummaryText => Info.SummaryText;
+    public bool IsAppliedAnywhere => Info.IsAppliedAnywhere;
+    public bool CanRemove => !Info.IsAppliedAnywhere;
 }
 
 /// <summary>
@@ -67,35 +76,33 @@ public sealed class BuildVariantsViewModel : ObservableObject
         SavePathsCommand = new RelayCommand(SavePaths, () => _shell.Config is not null);
         ResetPathsCommand = new RelayCommand(LoadPathDrafts, () => _shell.Config is not null);
 
-        AddPatchCommand = new RelayCommand(AddPatch, () => Patches is not null);
-        ApplyPatchCommand = new RelayCommand(p => TogglePatch(p as PatchItemViewModel, apply: true),
-                                             p => p is PatchItemViewModel { IsApplied: false });
-        RevertPatchCommand = new RelayCommand(p => TogglePatch(p as PatchItemViewModel, apply: false),
-                                              p => p is PatchItemViewModel { IsApplied: true });
+        AddPatchCommand = new RelayCommand(AddPatch, () => PatchEngine is not null);
+        TogglePatchCommand = new RelayCommand(p => ToggleSlot(p as PatchSlotViewModel),
+                                              p => p is PatchSlotViewModel);
         RemovePatchCommand = new RelayCommand(p => RemovePatch(p as PatchItemViewModel),
-                                              p => p is PatchItemViewModel { IsApplied: false });
+                                              p => p is PatchItemViewModel { CanRemove: true });
         CollapseJunctionCommand = new RelayCommand(CollapseJunction, () => BuildLinkIsJunction);
-        OpenPatchesFolderCommand = new RelayCommand(OpenPatchesFolder, () => Patches is not null);
+        OpenPatchesFolderCommand = new RelayCommand(OpenPatchesFolder, () => PatchEngine is not null);
     }
 
-    /// <summary>Patches laid over the retail install.</summary>
-    public ObservableCollection<PatchItemViewModel> RootPatches { get; } = new();
-
-    /// <summary>Patches laid over the folder the REPENTOGON launcher loads.</summary>
-    public ObservableCollection<PatchItemViewModel> RepentogonPatches { get; } = new();
+    /// <summary>
+    /// Every patch, once. Each row carries a slot per folder rather than the
+    /// patch living under one heading: the same fix usually has to go over the
+    /// retail install and the REPENTOGON build both, and listing it twice made
+    /// that look like two different patches.
+    /// </summary>
+    public ObservableCollection<PatchItemViewModel> Patches { get; } = new();
 
     public RelayCommand AddPatchCommand { get; }
-    public RelayCommand ApplyPatchCommand { get; }
-    public RelayCommand RevertPatchCommand { get; }
+    public RelayCommand TogglePatchCommand { get; }
     public RelayCommand RemovePatchCommand { get; }
     public RelayCommand CollapseJunctionCommand { get; }
     public RelayCommand OpenPatchesFolderCommand { get; }
 
-    public bool HasRootPatches => RootPatches.Count > 0;
-    public bool HasRepentogonPatches => RepentogonPatches.Count > 0;
-    public bool HasNoPatches => RootPatches.Count == 0 && RepentogonPatches.Count == 0;
+    public bool HasPatches => Patches.Count > 0;
+    public bool HasNoPatches => Patches.Count == 0;
 
-    private PatchService? Patches =>
+    private PatchService? PatchEngine =>
         string.IsNullOrWhiteSpace(_shell.Config?.SyncRoot)
             ? null
             : new PatchService(_shell.Process, _shell.Config!.SyncRoot!);
@@ -123,25 +130,24 @@ public sealed class BuildVariantsViewModel : ObservableObject
 
     private void RefreshPatches()
     {
-        RootPatches.Clear();
-        RepentogonPatches.Clear();
+        Patches.Clear();
 
-        var service = Patches;
+        var service = PatchEngine;
         if (service is not null)
         {
             foreach (var info in service.DescribeAll())
             {
-                var item = new PatchItemViewModel
+                Patches.Add(new PatchItemViewModel
                 {
                     Info = info,
-                    Drift = info.IsApplied ? service.DetectDrift(info.Name) : Array.Empty<PatchDrift>(),
-                };
-                (info.Target == PatchTarget.GameRoot ? RootPatches : RepentogonPatches).Add(item);
+                    Slots = info.States
+                        .Select(state => new PatchSlotViewModel { Patch = info.Name, State = state })
+                        .ToList(),
+                });
             }
         }
 
-        OnPropertyChanged(nameof(HasRootPatches));
-        OnPropertyChanged(nameof(HasRepentogonPatches));
+        OnPropertyChanged(nameof(HasPatches));
         OnPropertyChanged(nameof(HasNoPatches));
         OnPropertyChanged(nameof(BuildLinkIsJunction));
         OnPropertyChanged(nameof(JunctionMigrationText));
@@ -150,7 +156,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
     /// <summary>Register an unzipped folder as a patch, and ask what it is laid over.</summary>
     private void AddPatch()
     {
-        var service = Patches;
+        var service = PatchEngine;
         if (service is null) return;
 
         var dialog = new Microsoft.Win32.OpenFolderDialog
@@ -161,50 +167,44 @@ public sealed class BuildVariantsViewModel : ObservableObject
 
         var name = Path.GetFileName(dialog.FolderName.TrimEnd(Path.DirectorySeparatorChar));
 
-        var answer = MessageBox.Show(
-            $"Where does '{name}' go?\n\n" +
-            "Yes - over the retail install (the folder with isaac-ng.exe and mods\\).\n" +
-            "No - over the REPENTOGON folder the launcher loads.\n\n" +
-            "Nothing is applied yet; this only files it away so you can apply it when you want it.",
-            "Add a patch", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-
-        if (answer == MessageBoxResult.Cancel) return;
-        var target = answer == MessageBoxResult.Yes ? PatchTarget.GameRoot : PatchTarget.Repentogon;
-
         RunPatchOperation(() =>
         {
-            var info = service.Install(dialog.FolderName, name, target);
-            _shell.Report($"Added '{info.Name}' - {info.SummaryText}, for the {info.TargetText}.");
+            // No folder is chosen here any more. A patch is filed once and can
+            // then be laid over either folder, or both — which is what the same
+            // fix usually needs.
+            var info = service.Install(dialog.FolderName, name, PatchTarget.GameRoot);
+            _shell.Report($"Added '{info.Name}' - {info.SummaryText}. Apply it to either folder below.");
         });
     }
 
-    private void TogglePatch(PatchItemViewModel? item, bool apply)
+    private void ToggleSlot(PatchSlotViewModel? slot)
     {
-        var service = Patches;
-        if (service is null || item is null || _shell.Config is null) return;
+        var service = PatchEngine;
+        if (service is null || slot is null || _shell.Config is null) return;
 
-        var targetDir = TargetDirFor(item.Info.Target);
+        var targetDir = TargetDirFor(slot.Target);
+        var where = slot.State.TargetText;
+
         if (!Directory.Exists(targetDir))
         {
-            MessageBox.Show($"The {item.Info.TargetText} does not exist:\n{targetDir}\n\nCheck the paths below.",
+            MessageBox.Show($"The {where} does not exist:\n{targetDir}\n\nCheck the paths below.",
                             "Patches", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
-        if (apply)
+        if (!slot.IsApplied)
         {
             if (MessageBox.Show(
-                    $"Lay '{item.Name}' over the {item.Info.TargetText}?\n\n" +
-                    $"{targetDir}\n\n" +
-                    $"{item.SummaryText}. Every file it replaces is copied aside first, and reverting " +
-                    "puts them all back. Nothing is deleted.",
+                    $"Lay '{slot.Patch}' over the {where}?\n\n{targetDir}\n\n" +
+                    "Every file it replaces is copied aside first, and reverting puts them all back. " +
+                    "Nothing is deleted.",
                     "Apply patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
                 return;
 
             RunPatchOperation(() =>
             {
-                var result = service.Apply(item.Name, targetDir);
-                _shell.Report("Applied " + result.Summary);
+                var result = service.Apply(slot.Patch, slot.Target, targetDir);
+                _shell.Report($"Applied to the {where} - " + result.Summary);
                 if (result.Skipped.Count > 0)
                     MessageBox.Show(
                         "Applied, but these were left alone:\n\n" +
@@ -216,10 +216,10 @@ public sealed class BuildVariantsViewModel : ObservableObject
 
         // Reverting: drift is the case worth stopping on.
         var force = false;
-        if (item.HasDrift)
+        if (slot.HasDrift)
         {
             var answer = MessageBox.Show(
-                $"{item.DriftText}\n\n" +
+                $"{slot.State.DriftCount} file(s) in the {where} have changed since '{slot.Patch}' was applied.\n\n" +
                 "That is usually a game update written over the patch, which makes those files newer " +
                 "than the copies kept when it was applied.\n\n" +
                 "Yes - put the old files back anyway.\n" +
@@ -230,7 +230,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
             force = answer == MessageBoxResult.Yes;
         }
         else if (MessageBox.Show(
-                     $"Take '{item.Name}' back off the {item.Info.TargetText}?\n\n" +
+                     $"Take '{slot.Patch}' back off the {where}?\n\n" +
                      "The files it replaced are restored and the ones it added are removed. " +
                      "The backups are kept either way.",
                      "Revert patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
@@ -240,8 +240,8 @@ public sealed class BuildVariantsViewModel : ObservableObject
 
         RunPatchOperation(() =>
         {
-            var result = service.Revert(item.Name, force);
-            _shell.Report("Reverted " + result.Summary);
+            var result = service.Revert(slot.Patch, slot.Target, force);
+            _shell.Report($"Reverted from the {where} - " + result.Summary);
             if (result.Skipped.Count > 0)
                 MessageBox.Show(
                     "These were left as they are, so the patch still counts as applied:\n\n" +
@@ -252,7 +252,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
 
     private void RemovePatch(PatchItemViewModel? item)
     {
-        var service = Patches;
+        var service = PatchEngine;
         if (service is null || item is null) return;
 
         if (MessageBox.Show(
@@ -305,7 +305,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
 
     private void OpenPatchesFolder()
     {
-        var service = Patches;
+        var service = PatchEngine;
         if (service is null) return;
         Directory.CreateDirectory(service.PatchesRoot);
         Process.Start(new ProcessStartInfo("explorer.exe", $"\"{service.PatchesRoot}\"") { UseShellExecute = true });

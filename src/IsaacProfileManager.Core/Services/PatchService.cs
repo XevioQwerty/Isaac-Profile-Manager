@@ -115,10 +115,19 @@ public sealed class PatchService
     {
         var dir = Path.Combine(PatchesRoot, patch);
         var manifest = LoadManifest(patch);
-        var journal = LoadJournal(patch);
 
         var files = PayloadFiles(dir).ToList();
         var size = files.Sum(f => new FileInfo(f).Length);
+
+        var states = AllTargets.Select(target =>
+        {
+            var journal = LoadJournal(patch, target);
+            return new PatchTargetState(
+                target,
+                journal is not null,
+                journal?.AppliedUtc,
+                journal is null ? 0 : DetectDrift(patch, target).Count);
+        }).ToList();
 
         return new PatchInfo(
             Name: manifest.Name,
@@ -128,8 +137,7 @@ public sealed class PatchService
             FileCount: files.Count,
             SizeBytes: size,
             Deletes: manifest.Delete,
-            IsApplied: journal is not null,
-            AppliedUtc: journal?.AppliedUtc);
+            States: states);
     }
 
     public IReadOnlyList<PatchInfo> DescribeAll() => ListPatches().Select(Describe).ToList();
@@ -150,11 +158,18 @@ public sealed class PatchService
 
     // --- Journals ----------------------------------------------------------
 
-    private string JournalPath(string patch) => Path.Combine(AppliedRoot, patch + ".json");
+    /// <summary>
+    /// One journal per patch <em>per target</em>. The same fix commonly has to
+    /// go over the retail install and the REPENTOGON build at once, and those
+    /// are separate sets of files that must be revertible independently — a
+    /// single journal per patch could only record one of them.
+    /// </summary>
+    private string JournalPath(string patch, PatchTarget target) =>
+        Path.Combine(AppliedRoot, $"{patch}.{target}.json");
 
-    public PatchJournal? LoadJournal(string patch)
+    public PatchJournal? LoadJournal(string patch, PatchTarget target)
     {
-        var path = JournalPath(patch);
+        var path = JournalPath(patch, target);
         if (!File.Exists(path)) return null;
 
         try
@@ -178,11 +193,18 @@ public sealed class PatchService
     private void SaveJournal(PatchJournal journal)
     {
         Directory.CreateDirectory(AppliedRoot);
-        File.WriteAllText(JournalPath(journal.Patch),
+        File.WriteAllText(JournalPath(journal.Patch, journal.Target),
                           JsonSerializer.Serialize(journal, SerializerOptions), new UTF8Encoding(false));
     }
 
-    public bool IsApplied(string patch) => File.Exists(JournalPath(patch));
+    public bool IsApplied(string patch, PatchTarget target) => File.Exists(JournalPath(patch, target));
+
+    /// <summary>Applied over either folder, so removing the patch is unsafe.</summary>
+    public bool IsAppliedAnywhere(string patch) =>
+        AllTargets.Any(t => IsApplied(patch, t));
+
+    private static readonly PatchTarget[] AllTargets =
+        { PatchTarget.GameRoot, PatchTarget.Repentogon };
 
     // --- Safety ------------------------------------------------------------
 
@@ -233,7 +255,7 @@ public sealed class PatchService
     /// file would make the second one's backup a copy of the first one's work,
     /// so reverting in the wrong order would restore the wrong bytes.
     /// </summary>
-    public IReadOnlyList<string> FindConflicts(string patch, string targetDir)
+    public IReadOnlyList<string> FindConflicts(string patch, PatchTarget target, string targetDir)
     {
         var wanted = PlannedPaths(patch, targetDir).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (wanted.Count == 0) return Array.Empty<string>();
@@ -243,7 +265,10 @@ public sealed class PatchService
         {
             if (string.Equals(other, patch, StringComparison.OrdinalIgnoreCase)) continue;
 
-            var journal = LoadJournal(other);
+            // Only the same folder can collide. The same patch over the retail
+            // install and over the REPENTOGON build touches two different sets
+            // of files and is the whole point of allowing both.
+            var journal = LoadJournal(other, target);
             if (journal is null) continue;
 
             foreach (var entry in journal.Entries)
@@ -284,7 +309,8 @@ public sealed class PatchService
     /// crash between two files leaves a journal describing the first and a
     /// revert that undoes exactly it.
     /// </summary>
-    public PatchApplyResult Apply(string patch, string targetDir, IProgress<string>? progress = null)
+    public PatchApplyResult Apply(string patch, PatchTarget target, string targetDir,
+                                  IProgress<string>? progress = null)
     {
         RequireIsaacClosed();
 
@@ -293,10 +319,10 @@ public sealed class PatchService
             throw new UnsafePathException($"No such patch: {dir}");
         if (!Directory.Exists(targetDir))
             throw new UnsafePathException($"Target folder does not exist: {targetDir}");
-        if (IsApplied(patch))
-            throw new UnsafePathException($"'{patch}' is already applied. Revert it first.");
+        if (IsApplied(patch, target))
+            throw new UnsafePathException($"'{patch}' is already applied to the {target}. Revert it first.");
 
-        var conflicts = FindConflicts(patch, targetDir);
+        var conflicts = FindConflicts(patch, target, targetDir);
         if (conflicts.Count > 0)
             throw new UnsafePathException(
                 $"'{patch}' touches files another applied patch owns:\n\n" +
@@ -305,12 +331,12 @@ public sealed class PatchService
 
         var manifest = LoadManifest(patch);
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
-        var backupDir = Path.Combine(BackupRoot, $"{patch}-{stamp}");
+        var backupDir = Path.Combine(BackupRoot, $"{patch}-{target}-{stamp}");
 
         var journal = new PatchJournal
         {
             Patch = patch,
-            Target = manifest.Target,
+            Target = target,
             TargetPath = Path.GetFullPath(targetDir),
             AppliedUtc = DateTime.UtcNow.ToString("o"),
             Complete = false,
@@ -415,9 +441,9 @@ public sealed class PatchService
     /// an applied patch is the ordinary cause, and it means a plain revert would
     /// put an old file over a newer one.
     /// </summary>
-    public IReadOnlyList<PatchDrift> DetectDrift(string patch)
+    public IReadOnlyList<PatchDrift> DetectDrift(string patch, PatchTarget target)
     {
-        var journal = LoadJournal(patch);
+        var journal = LoadJournal(patch, target);
         if (journal is null) return Array.Empty<PatchDrift>();
 
         var drift = new List<PatchDrift>();
@@ -450,12 +476,13 @@ public sealed class PatchService
     /// wrote it — usually a Steam update, i.e. the newer copy. Backups are never
     /// deleted here; a revert that turns out to be wrong is still recoverable.
     /// </summary>
-    public PatchRevertResult Revert(string patch, bool force = false, IProgress<string>? progress = null)
+    public PatchRevertResult Revert(string patch, PatchTarget target, bool force = false,
+                                    IProgress<string>? progress = null)
     {
         RequireIsaacClosed();
 
-        var journal = LoadJournal(patch)
-                      ?? throw new UnsafePathException($"'{patch}' is not applied — there is nothing to undo.");
+        var journal = LoadJournal(patch, target)
+                      ?? throw new UnsafePathException($"'{patch}' is not applied to the {target} — there is nothing to undo.");
 
         var skipped = new List<PatchSkip>();
         int removed = 0, restored = 0;
@@ -505,7 +532,7 @@ public sealed class PatchService
 
         // Anything skipped is still patched, so the journal has to stay or the
         // record of those files would be lost.
-        if (skipped.Count == 0) File.Delete(JournalPath(patch));
+        if (skipped.Count == 0) File.Delete(JournalPath(patch, target));
 
         return new PatchRevertResult(patch, removed, restored, skipped);
     }
@@ -545,7 +572,7 @@ public sealed class PatchService
     /// <summary>Forget a patch. Refuses while it is applied, so its journal cannot be orphaned.</summary>
     public void Remove(string patch)
     {
-        if (IsApplied(patch))
+        if (IsAppliedAnywhere(patch))
             throw new UnsafePathException($"'{patch}' is still applied. Revert it before removing it.");
 
         var dir = Path.Combine(PatchesRoot, patch);

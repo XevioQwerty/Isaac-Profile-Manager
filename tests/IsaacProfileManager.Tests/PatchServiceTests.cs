@@ -62,12 +62,12 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "onlinefix", new() { ["OnlineFix.dll"] = "fix bytes" });
 
-        var result = service.Apply("onlinefix", game);
+        var result = service.Apply("onlinefix", PatchTarget.GameRoot, game);
 
         Assert.Equal("fix bytes", File.ReadAllText(Path.Combine(game, "OnlineFix.dll")));
         Assert.Equal(1, result.Added);
         Assert.Equal(0, result.Replaced);
-        Assert.True(service.IsApplied("onlinefix"));
+        Assert.True(service.IsApplied("onlinefix", PatchTarget.GameRoot));
     }
 
     [Fact]
@@ -78,13 +78,13 @@ public class PatchServiceTests
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "stock exe");
         GivePatch(service, "onlinefix", new() { ["isaac-ng.exe"] = "patched exe" });
 
-        var result = service.Apply("onlinefix", game);
+        var result = service.Apply("onlinefix", PatchTarget.GameRoot, game);
 
         Assert.Equal("patched exe", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
         Assert.Equal(1, result.Replaced);
 
         // The original has to survive somewhere or revert is impossible.
-        var entry = service.LoadJournal("onlinefix")!.Entries.Single();
+        var entry = service.LoadJournal("onlinefix", PatchTarget.GameRoot)!.Entries.Single();
         Assert.Equal(PatchOp.Replaced, entry.Op);
         Assert.Equal("stock exe", File.ReadAllText(entry.Backup!));
     }
@@ -96,7 +96,7 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { [@"resources\packed\a.a"] = "nested" });
 
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
         Assert.Equal("nested", File.ReadAllText(Path.Combine(game, "resources", "packed", "a.a")));
     }
@@ -109,7 +109,7 @@ public class PatchServiceTests
         File.WriteAllText(Path.Combine(game, "steam_api.dll"), "the real one");
         GivePatch(service, "fix", new() { ["OnlineFix.dll"] = "fix" }, deletes: new[] { "steam_api.dll" });
 
-        var result = service.Apply("fix", game);
+        var result = service.Apply("fix", PatchTarget.GameRoot, game);
 
         Assert.False(File.Exists(Path.Combine(game, "steam_api.dll")));
         Assert.Equal(1, result.Deleted);
@@ -123,7 +123,7 @@ public class PatchServiceTests
         GivePatch(service, "fix", new() { ["OnlineFix.dll"] = "fix" });
         process.Running = true;
 
-        Assert.Throws<UnsafePathException>(() => service.Apply("fix", game));
+        Assert.Throws<UnsafePathException>(() => service.Apply("fix", PatchTarget.GameRoot, game));
         Assert.False(File.Exists(Path.Combine(game, "OnlineFix.dll")));
     }
 
@@ -133,11 +133,11 @@ public class PatchServiceTests
         using var temp = new TempDir();
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "one" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
         // A second apply would back up its own output as though it were the
         // original, and the real original would be lost.
-        Assert.Throws<UnsafePathException>(() => service.Apply("fix", game));
+        Assert.Throws<UnsafePathException>(() => service.Apply("fix", PatchTarget.GameRoot, game));
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class PatchServiceTests
         // it is enumerated from inside the patch folder, so its relative path
         // is inside by construction.
         GivePatch(service, "evil", new() { ["a.dll"] = "a" }, deletes: new[] { @"..\outside.txt" });
-        var result = service.Apply("evil", game);
+        var result = service.Apply("evil", PatchTarget.GameRoot, game);
 
         Assert.True(File.Exists(outside));
         Assert.Equal("untouched", File.ReadAllText(outside));
@@ -170,7 +170,7 @@ public class PatchServiceTests
         File.WriteAllText(Path.Combine(inMods, "main.lua"), "someone's mod");
 
         GivePatch(service, "fix", new() { ["a.dll"] = "a" }, deletes: new[] { @"mods\SomeMod\main.lua" });
-        var result = service.Apply("fix", game);
+        var result = service.Apply("fix", PatchTarget.GameRoot, game);
 
         Assert.True(File.Exists(Path.Combine(inMods, "main.lua")));
         Assert.Contains(result.Skipped, s => s.Reason.Contains("mods"));
@@ -183,7 +183,7 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { [@"mods\SomeMod\main.lua"] = "would land in a profile" });
 
-        var result = service.Apply("fix", game);
+        var result = service.Apply("fix", PatchTarget.GameRoot, game);
 
         Assert.False(Directory.Exists(Path.Combine(game, "mods")));
         Assert.Contains(result.Skipped, s => s.Reason.Contains("mods"));
@@ -198,10 +198,10 @@ public class PatchServiceTests
 
         GivePatch(service, "first", new() { ["isaac-ng.exe"] = "first patch" });
         GivePatch(service, "second", new() { ["isaac-ng.exe"] = "second patch" });
-        service.Apply("first", game);
+        service.Apply("first", PatchTarget.GameRoot, game);
 
         // The second one's backup would be the first one's output.
-        var error = Assert.Throws<UnsafePathException>(() => service.Apply("second", game));
+        var error = Assert.Throws<UnsafePathException>(() => service.Apply("second", PatchTarget.GameRoot, game));
         Assert.Contains("first", error.Message);
         Assert.Equal("first patch", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
     }
@@ -228,14 +228,14 @@ public class PatchServiceTests
             [@"resources\extra.a"] = "added nested",
         }, deletes: new[] { "steam_api.dll" });
 
-        service.Apply("onlinefix", game);
+        service.Apply("onlinefix", PatchTarget.GameRoot, game);
         Assert.NotEqual(before, Snapshot(game));
 
-        var result = service.Revert("onlinefix");
+        var result = service.Revert("onlinefix", PatchTarget.GameRoot);
 
         Assert.Equal(before, Snapshot(game));
         Assert.Empty(result.Skipped);
-        Assert.False(service.IsApplied("onlinefix"));
+        Assert.False(service.IsApplied("onlinefix", PatchTarget.GameRoot));
     }
 
     [Fact]
@@ -245,18 +245,18 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "stock exe");
         GivePatch(service, "fix", new() { ["isaac-ng.exe"] = "patched exe" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
         // Steam has updated the game over the top of the patch.
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "newer stock exe");
 
-        var result = service.Revert("fix");
+        var result = service.Revert("fix", PatchTarget.GameRoot);
 
         Assert.Equal("newer stock exe", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
         Assert.Single(result.Skipped);
 
         // Still applied as far as the record goes, because that file still is.
-        Assert.True(service.IsApplied("fix"));
+        Assert.True(service.IsApplied("fix", PatchTarget.GameRoot));
     }
 
     [Fact]
@@ -266,14 +266,14 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "stock exe");
         GivePatch(service, "fix", new() { ["isaac-ng.exe"] = "patched exe" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "newer stock exe");
 
-        var result = service.Revert("fix", force: true);
+        var result = service.Revert("fix", PatchTarget.GameRoot, force: true);
 
         Assert.Equal("stock exe", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
         Assert.Empty(result.Skipped);
-        Assert.False(service.IsApplied("fix"));
+        Assert.False(service.IsApplied("fix", PatchTarget.GameRoot));
     }
 
     [Fact]
@@ -282,10 +282,10 @@ public class PatchServiceTests
         using var temp = new TempDir();
         var (service, process, game, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "one" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
         process.Running = true;
 
-        Assert.Throws<UnsafePathException>(() => service.Revert("fix"));
+        Assert.Throws<UnsafePathException>(() => service.Revert("fix", PatchTarget.GameRoot));
         Assert.True(File.Exists(Path.Combine(game, "a.dll")));
     }
 
@@ -296,7 +296,7 @@ public class PatchServiceTests
         var (service, _, _, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "one" });
 
-        Assert.Throws<UnsafePathException>(() => service.Revert("fix"));
+        Assert.Throws<UnsafePathException>(() => service.Revert("fix", PatchTarget.GameRoot));
     }
 
     [Fact]
@@ -306,10 +306,10 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "stock exe");
         GivePatch(service, "fix", new() { ["isaac-ng.exe"] = "patched exe" });
-        service.Apply("fix", game);
-        var backup = service.LoadJournal("fix")!.Entries.Single().Backup!;
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        var backup = service.LoadJournal("fix", PatchTarget.GameRoot)!.Entries.Single().Backup!;
 
-        service.Revert("fix");
+        service.Revert("fix", PatchTarget.GameRoot);
 
         // A revert that turns out to be wrong still has somewhere to go back to.
         Assert.True(File.Exists(backup));
@@ -327,18 +327,18 @@ public class PatchServiceTests
         var before = Snapshot(game);
 
         GivePatch(service, "fix", new() { ["one.dll"] = "patched one", ["two.dll"] = "patched two" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
         // Simulate a crash after the first file: drop the second entry, as the
         // incrementally-saved journal would have looked at that moment, and put
         // the second file back the way the apply had not yet changed it.
-        var journal = service.LoadJournal("fix")!;
+        var journal = service.LoadJournal("fix", PatchTarget.GameRoot)!;
         var dropped = journal.Entries[1];
         File.Copy(dropped.Backup!, Path.Combine(game, dropped.Path), overwrite: true);
         journal.Entries.RemoveAt(1);
         journal.Complete = false;
         Directory.CreateDirectory(service.AppliedRoot);
-        File.WriteAllText(Path.Combine(service.AppliedRoot, "fix.json"),
+        File.WriteAllText(Path.Combine(service.AppliedRoot, "fix.GameRoot.json"),
                           System.Text.Json.JsonSerializer.Serialize(journal,
                               new System.Text.Json.JsonSerializerOptions
                               {
@@ -346,7 +346,7 @@ public class PatchServiceTests
                                   Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
                               }));
 
-        service.Revert("fix");
+        service.Revert("fix", PatchTarget.GameRoot);
 
         Assert.Equal(before, Snapshot(game));
     }
@@ -360,12 +360,12 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "stock exe");
         GivePatch(service, "fix", new() { ["isaac-ng.exe"] = "patched exe", ["b.dll"] = "b" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
-        Assert.Empty(service.DetectDrift("fix"));
+        Assert.Empty(service.DetectDrift("fix", PatchTarget.GameRoot));
 
         File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "steam updated me");
-        var drift = service.DetectDrift("fix");
+        var drift = service.DetectDrift("fix", PatchTarget.GameRoot);
 
         Assert.Single(drift);
         Assert.Equal("isaac-ng.exe", drift[0].Path);
@@ -377,10 +377,10 @@ public class PatchServiceTests
         using var temp = new TempDir();
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "a" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
         File.Delete(Path.Combine(game, "a.dll"));
 
-        Assert.Equal("missing", service.DetectDrift("fix").Single().Actual);
+        Assert.Equal("missing", service.DetectDrift("fix", PatchTarget.GameRoot).Single().Actual);
     }
 
     // --- Installing and describing -----------------------------------------
@@ -432,9 +432,9 @@ public class PatchServiceTests
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "a" });
 
-        Assert.False(service.Describe("fix").IsApplied);
-        service.Apply("fix", game);
-        Assert.True(service.Describe("fix").IsApplied);
+        Assert.False(service.Describe("fix").IsAppliedAnywhere);
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        Assert.True(service.Describe("fix").IsAppliedAnywhere);
     }
 
     [Fact]
@@ -449,24 +449,130 @@ public class PatchServiceTests
         File.WriteAllText(Path.Combine(dir, "a.dll"), "a");
 
         Assert.Equal("handmade", service.Describe("handmade").Name);
-        service.Apply("handmade", game);
+        service.Apply("handmade", PatchTarget.GameRoot, game);
         Assert.True(File.Exists(Path.Combine(game, "a.dll")));
     }
 
     [Fact]
-    public void Remove_RefusesWhileTheePatchIsStillApplied()
+    public void Remove_RefusesWhileThePatchIsStillApplied()
     {
         using var temp = new TempDir();
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "a" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
         // Removing it would orphan the journal and strand the applied files.
         Assert.Throws<UnsafePathException>(() => service.Remove("fix"));
 
-        service.Revert("fix");
+        service.Revert("fix", PatchTarget.GameRoot);
         service.Remove("fix");
         Assert.DoesNotContain("fix", service.ListPatches());
+    }
+
+    // --- One patch over both folders ---------------------------------------
+
+    [Fact]
+    public void TheSamePatchGoesOverBothFoldersIndependently()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        var repentogon = Directory.CreateDirectory(Path.Combine(game, "Repentogon")).FullName;
+
+        File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "retail stock");
+        File.WriteAllText(Path.Combine(repentogon, "isaac-ng.exe"), "rgon stock");
+        GivePatch(service, "onlinefix", new() { ["isaac-ng.exe"] = "patched" });
+
+        service.Apply("onlinefix", PatchTarget.GameRoot, game);
+        service.Apply("onlinefix", PatchTarget.Repentogon, repentogon);
+
+        Assert.Equal("patched", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
+        Assert.Equal("patched", File.ReadAllText(Path.Combine(repentogon, "isaac-ng.exe")));
+        Assert.True(service.IsApplied("onlinefix", PatchTarget.GameRoot));
+        Assert.True(service.IsApplied("onlinefix", PatchTarget.Repentogon));
+    }
+
+    [Fact]
+    public void RevertingOneFolderLeavesTheOtherPatched()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        var repentogon = Directory.CreateDirectory(Path.Combine(game, "Repentogon")).FullName;
+
+        File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "retail stock");
+        File.WriteAllText(Path.Combine(repentogon, "isaac-ng.exe"), "rgon stock");
+        GivePatch(service, "onlinefix", new() { ["isaac-ng.exe"] = "patched" });
+
+        service.Apply("onlinefix", PatchTarget.GameRoot, game);
+        service.Apply("onlinefix", PatchTarget.Repentogon, repentogon);
+
+        service.Revert("onlinefix", PatchTarget.GameRoot);
+
+        // Each folder keeps its own original, so the two cannot cross over.
+        Assert.Equal("retail stock", File.ReadAllText(Path.Combine(game, "isaac-ng.exe")));
+        Assert.Equal("patched", File.ReadAllText(Path.Combine(repentogon, "isaac-ng.exe")));
+        Assert.False(service.IsApplied("onlinefix", PatchTarget.GameRoot));
+        Assert.True(service.IsApplied("onlinefix", PatchTarget.Repentogon));
+    }
+
+    [Fact]
+    public void ApplyingTwiceToTheSameFolderIsStillRefused()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["a.dll"] = "one" });
+        service.Apply("fix", PatchTarget.GameRoot, game);
+
+        Assert.Throws<UnsafePathException>(() => service.Apply("fix", PatchTarget.GameRoot, game));
+    }
+
+    [Fact]
+    public void ADifferentPatchOverTheOtherFolderIsNotAConflict()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        var repentogon = Directory.CreateDirectory(Path.Combine(game, "Repentogon")).FullName;
+        File.WriteAllText(Path.Combine(game, "isaac-ng.exe"), "retail stock");
+        File.WriteAllText(Path.Combine(repentogon, "isaac-ng.exe"), "rgon stock");
+
+        GivePatch(service, "first", new() { ["isaac-ng.exe"] = "first" });
+        GivePatch(service, "second", new() { ["isaac-ng.exe"] = "second" });
+
+        service.Apply("first", PatchTarget.GameRoot, game);
+
+        // Same filename, different folder: nothing is being fought over.
+        service.Apply("second", PatchTarget.Repentogon, repentogon);
+        Assert.Equal("second", File.ReadAllText(Path.Combine(repentogon, "isaac-ng.exe")));
+    }
+
+    [Fact]
+    public void RemoveRefusesWhileAppliedToEitherFolder()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        var repentogon = Directory.CreateDirectory(Path.Combine(game, "Repentogon")).FullName;
+        GivePatch(service, "fix", new() { ["a.dll"] = "a" });
+        service.Apply("fix", PatchTarget.Repentogon, repentogon);
+
+        Assert.Throws<UnsafePathException>(() => service.Remove("fix"));
+
+        service.Revert("fix", PatchTarget.Repentogon);
+        service.Remove("fix");
+        Assert.DoesNotContain("fix", service.ListPatches());
+    }
+
+    [Fact]
+    public void DescribeReportsEachFolderSeparately()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["a.dll"] = "a" });
+        service.Apply("fix", PatchTarget.GameRoot, game);
+
+        var info = service.Describe("fix");
+
+        Assert.True(info.States.Single(t => t.Target == PatchTarget.GameRoot).IsApplied);
+        Assert.False(info.States.Single(t => t.Target == PatchTarget.Repentogon).IsApplied);
+        Assert.True(info.IsAppliedAnywhere);
     }
 
     [Fact]
@@ -475,7 +581,7 @@ public class PatchServiceTests
         using var temp = new TempDir();
         var (service, _, game, _) = Build(temp);
         GivePatch(service, "fix", new() { ["a.dll"] = "a" });
-        service.Apply("fix", game);
+        service.Apply("fix", PatchTarget.GameRoot, game);
 
         Assert.Equal(new[] { "fix" }, service.ListPatches());
     }
