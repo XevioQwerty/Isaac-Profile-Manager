@@ -115,6 +115,43 @@
             </Style>
 
             <!--
+                Tooltips need a style for the same reason menus do, but they fail
+                worse: the implicit TextBlock style above reaches inside popup
+                content, so tooltip text was painted near-white on the pale
+                system info background and could not be read at all.
+            -->
+            <Style TargetType="ToolTip">
+                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                <Setter Property="Background" Value="#1A1A20"/>
+                <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+                <Setter Property="FontFamily" Value="Segoe UI"/>
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="MaxWidth" Value="360"/>
+                <Setter Property="HasDropShadow" Value="False"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToolTip">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1" CornerRadius="4" Padding="9,6">
+                                <ContentPresenter>
+                                    <ContentPresenter.Resources>
+                                        <!-- Content that is a bare string becomes a TextBlock, which
+                                             must wrap rather than run off a 360px tooltip. -->
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                            <Setter Property="FontSize" Value="12"/>
+                                            <Setter Property="TextWrapping" Value="Wrap"/>
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--
                 Menus are templated in full for the same reason the ComboBox is:
                 the stock ones ignore Background and render as light grey system
                 chrome against these panels.
