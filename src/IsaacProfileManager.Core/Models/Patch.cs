@@ -50,14 +50,19 @@ public sealed class PatchManifest
     public List<string> Delete { get; set; } = new();
 
     /// <summary>
-    /// Files this patch installs that are rewritten while the game runs, so a
-    /// change to them means nothing.
+    /// Files this patch installs that carry state once the game has run, and so
+    /// must be left exactly as they are found.
     ///
-    /// Without this a config the fix rewrites on every launch looks exactly like
-    /// a game update written over the patch: the revert leaves it alone, a
-    /// skipped file means the patch is still partly applied, so the journal
-    /// stays and the patch can never be fully taken off. Observed with
-    /// <c>OnlineFix.ini</c>, which is rewritten at launch.
+    /// Two things follow, and both matter. A change to one is never reported as
+    /// drift — otherwise a config rewritten on every launch looks identical to a
+    /// game update landing on the patch, the revert leaves it behind, and a file
+    /// left behind means the patch is still partly applied, so it can never be
+    /// fully taken off. And the file is neither restored nor removed by a
+    /// revert, nor overwritten by a later apply.
+    ///
+    /// That second part is the whole point for <c>OnlineFix.ini</c>: the dll
+    /// writes a hash into it on first launch, and putting the pristine copy back
+    /// makes it first launch again, which sends you to a web page.
     ///
     /// Entries are relative paths, or <c>*.ext</c> to match by extension.
     /// </summary>
@@ -65,10 +70,19 @@ public sealed class PatchManifest
     public List<string> Volatile { get; set; } = new();
 
     /// <summary>
-    /// Always treated as volatile. Logs are written by whatever produced them
-    /// and are never the reason to hold on to a patch.
+    /// Always left alone, without a patch having to say so.
+    ///
+    /// Logs are written by whatever produced them. Settings files are the same
+    /// case one step further on: an ini a patch installs is a default, and once
+    /// the game has run it holds that install's state, so putting the shipped
+    /// copy back over it destroys something. OnlineFix.ini keeps a hash there
+    /// and reverting to the pristine copy makes the dll treat the next start as
+    /// a first launch, which opens a web page.
+    ///
+    /// On a first apply the file is absent and the default is laid down as
+    /// normal; only an existing one is left as it is.
     /// </summary>
-    public static readonly string[] AlwaysVolatile = { "*.log" };
+    public static readonly string[] AlwaysVolatile = { "*.log", "*.ini" };
 
     /// <summary>
     /// Extensions that may be <em>learned</em> as volatile from a drift prompt.

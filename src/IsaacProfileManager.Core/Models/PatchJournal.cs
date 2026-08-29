@@ -86,7 +86,8 @@ public sealed record PatchApplyResult(
     int Added,
     int Replaced,
     int Deleted,
-    IReadOnlyList<PatchSkip> Skipped)
+    IReadOnlyList<PatchSkip> Skipped,
+    int Preserved = 0)
 {
     public int Changed => Added + Replaced + Deleted;
 
@@ -98,6 +99,7 @@ public sealed record PatchApplyResult(
             if (Added > 0) parts.Add($"{Added} added");
             if (Replaced > 0) parts.Add($"{Replaced} replaced");
             if (Deleted > 0) parts.Add($"{Deleted} removed");
+            if (Preserved > 0) parts.Add($"{Preserved} left as found");
             if (parts.Count == 0) parts.Add("nothing to do");
             var skipped = Skipped.Count > 0 ? $", {Skipped.Count} skipped" : "";
             return $"'{Patch}': {string.Join(", ", parts)}{skipped}.";
@@ -110,7 +112,8 @@ public sealed record PatchRevertResult(
     string Patch,
     int Removed,
     int Restored,
-    IReadOnlyList<PatchSkip> Skipped)
+    IReadOnlyList<PatchSkip> Skipped,
+    int Preserved = 0)
 {
     public string Summary
     {
@@ -119,6 +122,7 @@ public sealed record PatchRevertResult(
             var parts = new List<string>();
             if (Removed > 0) parts.Add($"{Removed} removed");
             if (Restored > 0) parts.Add($"{Restored} restored");
+            if (Preserved > 0) parts.Add($"{Preserved} left in place");
             if (parts.Count == 0) parts.Add("nothing to undo");
             var skipped = Skipped.Count > 0 ? $", {Skipped.Count} left alone" : "";
             return $"'{Patch}': {string.Join(", ", parts)}{skipped}.";

@@ -272,12 +272,12 @@ public sealed class BuildVariantsViewModel : ObservableObject
                         (drifted.Count > 8 ? "\n  ..." : "");
 
             var answer = MessageBox.Show(
-                $"{drifted.Count} file(s) in the {where} have changed since '{slot.DisplayName}' was applied:\n\n" +
-                names + "\n\n" +
-                "If the game rewrites these every launch - a config the fix keeps its settings in, say - " +
-                "they drift every time, and a file left behind means the patch never comes fully off." + 
-                "\n\n" +
-                "Yes - put the old files back, and remember these as expected to change." + "\n" +
+                $"{drifted.Count} file(s) in the {where} have changed since '{slot.DisplayName}' was applied:"
+                + "\n\n" + names + "\n\n" +
+                "Settings files the game rewrites are already left alone. Anything still listed here is " +
+                "something else writing over the patch - usually a game update, which makes those files " +
+                "newer than the copies kept when it went on." + "\n\n" +
+                "Yes - put the old files back, and leave these ones alone from now on." + "\n" +
                 "No - leave the changed ones and undo the rest.",
                 "Files have changed since", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
 

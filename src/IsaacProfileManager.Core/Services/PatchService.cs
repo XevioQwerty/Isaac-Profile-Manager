@@ -343,7 +343,7 @@ public sealed class PatchService
         };
 
         var skipped = new List<PatchSkip>();
-        int added = 0, replaced = 0, deleted = 0;
+        int added = 0, replaced = 0, deleted = 0, preserved = 0;
 
         // Written before the first file, so an interrupted run is still known
         // to have started and can be reverted.
@@ -362,6 +362,22 @@ public sealed class PatchService
             progress?.Report(relative);
 
             var entry = new PatchEntry { Path = relative };
+
+            // A preserved file that is already there holds state the game wrote
+            // — re-laying the pristine copy over it would throw that away, which
+            // for OnlineFix.ini means being sent to a web page on next launch.
+            if (File.Exists(destination) && manifest.IsVolatile(relative))
+            {
+                entry.Op = PatchOp.Replaced;
+                entry.Sha1Before = Sha1Of(destination);
+                entry.Sha1After = entry.Sha1Before;
+                entry.Backup = BackUp(destination, backupDir, relative);
+
+                journal.Entries.Add(entry);
+                SaveJournal(journal);
+                preserved++;
+                continue;
+            }
 
             if (File.Exists(destination))
             {
@@ -416,7 +432,7 @@ public sealed class PatchService
         journal.Complete = true;
         SaveJournal(journal);
 
-        return new PatchApplyResult(patch, added, replaced, deleted, skipped);
+        return new PatchApplyResult(patch, added, replaced, deleted, skipped, preserved);
     }
 
     private static string BackUp(string file, string backupDir, string relative)
@@ -491,7 +507,7 @@ public sealed class PatchService
 
         var manifest = LoadManifest(patch);
         var skipped = new List<PatchSkip>();
-        int removed = 0, restored = 0;
+        int removed = 0, restored = 0, preserved = 0;
 
         // Reverse order, so a patch that both replaced a file and deleted
         // another undoes in the opposite order to the way it was done.
@@ -500,12 +516,20 @@ public sealed class PatchService
             var path = Path.Combine(journal.TargetPath, entry.Path);
             progress?.Report(entry.Path);
 
+            // Left exactly as found. Not counted as skipped: skipping means the
+            // patch is still partly on and holds the journal open, whereas this
+            // file staying is the intended outcome.
+            if (entry.Op != PatchOp.Deleted && manifest.IsVolatile(entry.Path))
+            {
+                if (File.Exists(path)) preserved++;
+                continue;
+            }
+
             if (entry.Op == PatchOp.Added)
             {
                 if (!File.Exists(path)) continue;
 
-                if (!force && !manifest.IsVolatile(entry.Path) &&
-                    entry.Sha1After is not null && Sha1Of(path) != entry.Sha1After)
+                if (!force && entry.Sha1After is not null && Sha1Of(path) != entry.Sha1After)
                 {
                     skipped.Add(new PatchSkip(entry.Path, "changed since the patch was applied"));
                     continue;
@@ -524,8 +548,7 @@ public sealed class PatchService
                 continue;
             }
 
-            if (!force && !manifest.IsVolatile(entry.Path) &&
-                entry.Op == PatchOp.Replaced && File.Exists(path) &&
+            if (!force && entry.Op == PatchOp.Replaced && File.Exists(path) &&
                 entry.Sha1After is not null && Sha1Of(path) != entry.Sha1After)
             {
                 skipped.Add(new PatchSkip(entry.Path, "changed since the patch was applied"));
@@ -542,7 +565,7 @@ public sealed class PatchService
         // record of those files would be lost.
         if (skipped.Count == 0) File.Delete(JournalPath(patch, target));
 
-        return new PatchRevertResult(patch, removed, restored, skipped);
+        return new PatchRevertResult(patch, removed, restored, skipped, preserved);
     }
 
     // --- Installing a new patch --------------------------------------------

@@ -597,7 +597,7 @@ public class PatchServiceTests
     }
 
     [Fact]
-    public void AVolatileFileDoesNotBlockTheRevert()
+    public void APreservedFileSurvivesTheRevertWithItsChanges()
     {
         using var temp = new TempDir();
         var (service, _, game, _) = Build(temp);
@@ -606,16 +606,75 @@ public class PatchServiceTests
                   volatiles: new[] { "OnlineFix.ini" });
 
         service.Apply("fix", PatchTarget.GameRoot, game);
-        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "[Main]\nBuildId=7");
+
+        // The dll has written its first-launch hash into the config.
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "[Main]\nHash=abc123");
 
         var result = service.Revert("fix", PatchTarget.GameRoot);
 
-        // This is the trap: a skipped file keeps the journal, so the patch could
-        // never be taken fully off however many times you tried.
+        // Putting the pristine copy back would make the next start look like a
+        // first launch again, which opens a web page.
+        Assert.Equal("[Main]\nHash=abc123", File.ReadAllText(Path.Combine(game, "OnlineFix.ini")));
+        Assert.Equal(1, result.Preserved);
+
+        // Everything else comes off, and a preserved file must not hold the
+        // journal open the way a skipped one does.
+        Assert.False(File.Exists(Path.Combine(game, "OnlineFix.dll")));
         Assert.Empty(result.Skipped);
         Assert.False(service.IsApplied("fix", PatchTarget.GameRoot));
-        Assert.False(File.Exists(Path.Combine(game, "OnlineFix.ini")));
-        Assert.False(File.Exists(Path.Combine(game, "OnlineFix.dll")));
+    }
+
+    [Fact]
+    public void ReapplyingDoesNotClobberAPreservedFile()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["OnlineFix.ini"] = "[Main]", ["OnlineFix.dll"] = "dll" },
+                  volatiles: new[] { "OnlineFix.ini" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "[Main]\nHash=abc123");
+        service.Revert("fix", PatchTarget.GameRoot);
+
+        var again = service.Apply("fix", PatchTarget.GameRoot, game);
+
+        // The hash has to survive the round trip, or the web page comes back on
+        // the second install rather than the first.
+        Assert.Equal("[Main]\nHash=abc123", File.ReadAllText(Path.Combine(game, "OnlineFix.ini")));
+        Assert.Equal(1, again.Preserved);
+    }
+
+    [Fact]
+    public void AFirstApplyStillLaysDownTheDefaultConfig()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+        GivePatch(service, "fix", new() { ["OnlineFix.ini"] = "[Main]" },
+                  volatiles: new[] { "OnlineFix.ini" });
+
+        var result = service.Apply("fix", PatchTarget.GameRoot, game);
+
+        // Nothing to preserve when it was not there: the shipped default lands.
+        Assert.Equal("[Main]", File.ReadAllText(Path.Combine(game, "OnlineFix.ini")));
+        Assert.Equal(0, result.Preserved);
+        Assert.Equal(1, result.Added);
+    }
+
+    [Fact]
+    public void ConfigFilesArePreservedWithoutBeingDeclared()
+    {
+        using var temp = new TempDir();
+        var (service, _, game, _) = Build(temp);
+
+        // No volatiles list at all — the patch the user already had.
+        GivePatch(service, "fix", new() { ["OnlineFix.ini"] = "[Main]", ["a.dll"] = "dll" });
+
+        service.Apply("fix", PatchTarget.GameRoot, game);
+        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "[Main]\nHash=abc123");
+        service.Revert("fix", PatchTarget.GameRoot);
+
+        Assert.Equal("[Main]\nHash=abc123", File.ReadAllText(Path.Combine(game, "OnlineFix.ini")));
+        Assert.False(File.Exists(Path.Combine(game, "a.dll")));
     }
 
     [Fact]
@@ -650,7 +709,10 @@ public class PatchServiceTests
         File.WriteAllText(Path.Combine(game, "repentogon.log"), "a session's worth of logging");
 
         Assert.Empty(service.DetectDrift("fix", PatchTarget.GameRoot));
-        Assert.Empty(service.Revert("fix", PatchTarget.GameRoot).Skipped);
+
+        var result = service.Revert("fix", PatchTarget.GameRoot);
+        Assert.Empty(result.Skipped);
+        Assert.Equal(1, result.Preserved);
     }
 
     [Fact]
@@ -658,16 +720,19 @@ public class PatchServiceTests
     {
         using var temp = new TempDir();
         var (service, _, game, _) = Build(temp);
-        GivePatch(service, "fix", new() { ["OnlineFix.ini"] = "[Main]" });
+
+        // A .cfg rather than a .ini: ini files are preserved automatically, so
+        // they never reach the prompt that offers to remember them.
+        GivePatch(service, "fix", new() { ["prefs.cfg"] = "defaults" });
 
         service.Apply("fix", PatchTarget.GameRoot, game);
-        File.WriteAllText(Path.Combine(game, "OnlineFix.ini"), "rewritten");
+        File.WriteAllText(Path.Combine(game, "prefs.cfg"), "rewritten");
         Assert.Single(service.DetectDrift("fix", PatchTarget.GameRoot));
 
-        service.MarkVolatile("fix", new[] { "OnlineFix.ini" });
+        service.MarkVolatile("fix", new[] { "prefs.cfg" });
 
         Assert.Empty(service.DetectDrift("fix", PatchTarget.GameRoot));
-        Assert.Contains("OnlineFix.ini", service.LoadManifest("fix").Volatile);
+        Assert.Contains("prefs.cfg", service.LoadManifest("fix").Volatile);
     }
 
     [Fact]
