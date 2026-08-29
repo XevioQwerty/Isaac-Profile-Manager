@@ -18,6 +18,9 @@ public sealed class BuildVariantsViewModel : ObservableObject
     private BuildVariantStatus? _status;
     private string? _selectedVariant;
     private string _progressText = string.Empty;
+    private string _gameDirDraft = string.Empty;
+    private string _buildRootDraft = string.Empty;
+    private string _linkFolderDraft = string.Empty;
 
     public BuildVariantsViewModel(MainViewModel shell)
     {
@@ -27,6 +30,106 @@ public sealed class BuildVariantsViewModel : ObservableObject
             () => Status is { IsReady: true } && SelectedVariant is not null && SelectedVariant != Status.ActiveVariant);
         InitializeCommand = new RelayCommand(async () => await InitializeAsync(), () => CanInitialize);
         OpenBuildRootCommand = new RelayCommand(OpenBuildRoot, () => Status is not null && Directory.Exists(Status.BuildRoot));
+        BrowseGameDirCommand = new RelayCommand(() => Browse("Where the vanilla game is installed", d => GameDirDraft = d));
+        BrowseBuildRootCommand = new RelayCommand(() => Browse("Where the build folders live", d => BuildRootDraft = d));
+        SavePathsCommand = new RelayCommand(SavePaths, () => _shell.Config is not null);
+        ResetPathsCommand = new RelayCommand(LoadPathDrafts, () => _shell.Config is not null);
+    }
+
+    public RelayCommand BrowseGameDirCommand { get; }
+    public RelayCommand BrowseBuildRootCommand { get; }
+    public RelayCommand SavePathsCommand { get; }
+    public RelayCommand ResetPathsCommand { get; }
+
+    /// <summary>The vanilla install: the folder holding the retail isaac-ng.exe.</summary>
+    public string GameDirDraft
+    {
+        get => _gameDirDraft;
+        set => SetField(ref _gameDirDraft, value);
+    }
+
+    /// <summary>Where the complete builds are kept, one subfolder per variant.</summary>
+    public string BuildRootDraft
+    {
+        get => _buildRootDraft;
+        set => SetField(ref _buildRootDraft, value);
+    }
+
+    /// <summary>
+    /// The subfolder of the game directory the launcher loads the downgraded
+    /// build from. A bare name is relative to the game directory.
+    /// </summary>
+    public string LinkFolderDraft
+    {
+        get => _linkFolderDraft;
+        set => SetField(ref _linkFolderDraft, value);
+    }
+
+    private void LoadPathDrafts()
+    {
+        var config = _shell.Config;
+        GameDirDraft = config?.GameDir ?? string.Empty;
+        BuildRootDraft = config is null ? string.Empty : BuildVariantService.ResolveBuildRoot(config);
+        LinkFolderDraft = config?.BuildLinkFolder ?? BuildVariantService.LinkFolderName;
+    }
+
+    private static void Browse(string title, Action<string> accept)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = title };
+        if (dialog.ShowDialog() == true) accept(dialog.FolderName);
+    }
+
+    /// <summary>
+    /// Write the three paths back to config.
+    ///
+    /// Deliberately does not move anything: these say where things already are,
+    /// and a wrong value should be a link that reads as Absent rather than a
+    /// silent relocation of a 1 GB build.
+    /// </summary>
+    private void SavePaths()
+    {
+        var config = _shell.Config;
+        if (config is null) return;
+
+        var gameDir = GameDirDraft.Trim();
+        var buildRoot = BuildRootDraft.Trim();
+        var linkFolder = LinkFolderDraft.Trim();
+
+        if (gameDir.Length > 0 && !Directory.Exists(gameDir))
+        {
+            MessageBox.Show($"No such folder:\n{gameDir}", "Build paths",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (linkFolder.Length == 0) linkFolder = BuildVariantService.LinkFolderName;
+
+        // A build root inside the folder we re-point would be swapped away with
+        // the build it is meant to outlive.
+        var resolvedLink = Path.IsPathRooted(linkFolder)
+            ? linkFolder
+            : Path.Combine(gameDir, linkFolder);
+        if (buildRoot.Length > 0 && gameDir.Length > 0 &&
+            Path.GetFullPath(buildRoot).TrimEnd('\\')
+                .StartsWith(Path.GetFullPath(resolvedLink).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(
+                "The build root cannot sit inside the folder being re-pointed - switching would " +
+                "take the other builds with it.",
+                "Build paths", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (gameDir.Length > 0) config.GameDir = gameDir;
+        config.BuildRoot = buildRoot.Length == 0 ? null : buildRoot;
+        config.BuildLinkFolder =
+            string.Equals(linkFolder, BuildVariantService.LinkFolderName, StringComparison.OrdinalIgnoreCase)
+                ? null
+                : linkFolder;
+
+        _shell.Store.Save(config);
+        _shell.Report("Saved the build paths.");
+        _shell.Reload();
     }
 
     public ObservableCollection<string> Variants { get; } = new();
@@ -124,6 +227,8 @@ public sealed class BuildVariantsViewModel : ObservableObject
         foreach (var variant in Status.Variants) Variants.Add(variant);
 
         SelectedVariant = Variants.Contains(previous ?? string.Empty) ? previous : Status.ActiveVariant;
+
+        LoadPathDrafts();
     }
 
     private void Switch()

@@ -77,8 +77,21 @@ public sealed class BuildVariantService : IBuildVariantService
             ? config.BuildRoot!
             : Path.Combine(config.GameDir ?? string.Empty, DefaultBuildRootName);
 
-    public static string ResolveLinkPath(AppConfig config) =>
-        Path.Combine(config.GameDir ?? string.Empty, LinkFolderName);
+    /// <summary>
+    /// The folder the build link lives at. Normally <c>&lt;GameDir&gt;\Repentogon</c>,
+    /// but the folder name is configurable: an absolute value in config wins
+    /// outright, a bare name is taken relative to the game directory.
+    /// </summary>
+    public static string ResolveLinkPath(AppConfig config)
+    {
+        var configured = config.BuildLinkFolder;
+        if (string.IsNullOrWhiteSpace(configured))
+            return Path.Combine(config.GameDir ?? string.Empty, LinkFolderName);
+
+        return Path.IsPathRooted(configured)
+            ? configured
+            : Path.Combine(config.GameDir ?? string.Empty, configured);
+    }
 
     public BuildVariantStatus GetStatus(AppConfig config)
     {

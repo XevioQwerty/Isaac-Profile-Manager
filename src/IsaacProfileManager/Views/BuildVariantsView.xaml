@@ -69,11 +69,51 @@
             <Border Style="{StaticResource Card}">
                 <StackPanel>
                     <TextBlock Text="Paths" Style="{StaticResource Heading}"/>
-                    <TextBlock Text="Build link" Style="{StaticResource Dim}"/>
-                    <TextBlock Text="{Binding LinkPathText}" Style="{StaticResource Mono}" Margin="0,0,0,8"/>
+                    <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="These say where things already are. Changing one moves nothing and copies nothing - if a path is wrong, the build link simply reads as missing until you correct it."/>
+
+                    <TextBlock Text="Vanilla game directory" Style="{StaticResource Dim}"/>
+                    <TextBlock Style="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"
+                               Text="The retail install: the folder holding isaac-ng.exe and mods\."/>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding GameDirDraft, UpdateSourceTrigger=PropertyChanged}"
+                                 Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseGameDirCommand}"/>
+                    </Grid>
+
+                    <TextBlock Text="REPENTOGON subfolder" Style="{StaticResource Dim}"/>
+                    <TextBlock Style="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"
+                               Text="The folder the launcher loads the downgraded build from, and the one this tab re-points. A bare name is taken inside the game directory; the stock value is Repentogon."/>
+                    <TextBox Text="{Binding LinkFolderDraft, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10"/>
+
                     <TextBlock Text="Build root" Style="{StaticResource Dim}"/>
-                    <TextBlock Text="{Binding BuildRootText}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
-                    <Button Content="Open build root" Command="{Binding OpenBuildRootCommand}" HorizontalAlignment="Left"/>
+                    <TextBlock Style="{StaticResource Dim}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2"
+                               Text="One complete build per subfolder. Must not sit inside the subfolder above, or switching would take the other builds with it."/>
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0" Text="{Binding BuildRootDraft, UpdateSourceTrigger=PropertyChanged}"
+                                 Margin="0,0,8,0"/>
+                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseBuildRootCommand}"/>
+                    </Grid>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Button Content="Save paths" Style="{StaticResource PrimaryButton}"
+                                Command="{Binding SavePathsCommand}" Margin="0,0,8,0"/>
+                        <Button Content="Reset" Command="{Binding ResetPathsCommand}" Margin="0,0,8,0"/>
+                        <Button Content="Open build root" Command="{Binding OpenBuildRootCommand}"/>
+                    </StackPanel>
+
+                    <TextBlock Text="Build link resolves to" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding LinkPathText}" Style="{StaticResource Mono}" Margin="0,0,0,8"/>
+                    <TextBlock Text="Build root resolves to" Style="{StaticResource Dim}"/>
+                    <TextBlock Text="{Binding BuildRootText}" Style="{StaticResource Mono}"/>
                 </StackPanel>
             </Border>
 

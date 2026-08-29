@@ -73,6 +73,19 @@ public sealed class AppConfig
     [JsonPropertyName("BuildRoot")]
     public string? BuildRoot { get; set; }
 
+    /// <summary>
+    /// The folder inside the game directory that the REPENTOGON launcher loads
+    /// the downgraded build from, and which this tool re-points to switch builds.
+    ///
+    /// Null means the stock <c>Repentogon</c>. It is configurable because the
+    /// name is the launcher's convention rather than something we control, and a
+    /// reinstall or a non-standard layout can put it elsewhere. Added
+    /// additively, so ConfigVersion stays at 3 and the PowerShell side, which
+    /// never reads it, is unaffected.
+    /// </summary>
+    [JsonPropertyName("BuildLinkFolder")]
+    public string? BuildLinkFolder { get; set; }
+
     /// <summary>Human-readable note of the variant last activated. Advisory only — the junction is the truth.</summary>
     [JsonPropertyName("ActiveBuildVariant")]
     public string? ActiveBuildVariant { get; set; }
