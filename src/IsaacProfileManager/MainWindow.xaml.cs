@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         // a list box, a combo box — and those must not trigger a full reload.
         if (!ReferenceEquals(e.OriginalSource, Tabs)) return;
 
+        _viewModel.SelectedTabIndex = Tabs.SelectedIndex;
         _viewModel.RefreshSelectedTab(Tabs.SelectedIndex);
     }
 }

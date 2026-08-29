@@ -138,6 +138,51 @@ public sealed class ModProfilesViewModel : ObservableObject
 
     public ObservableCollection<ProfileItem> Profiles { get; } = new();
 
+    /// <summary>
+    /// The patches for the build the selected profile will actually start, so
+    /// they can be flipped next to the Launch button instead of by going to the
+    /// Build tab and working out which folder applies.
+    ///
+    /// Which folder that is follows the profile's own build choice: a profile
+    /// marked to run REPENTOGON is served by patches over the REPENTOGON build,
+    /// anything else by patches over the retail install.
+    /// </summary>
+    public ObservableCollection<PatchSlotViewModel> QuickPatches { get; } = new();
+
+    public bool HasQuickPatches => QuickPatches.Count > 0;
+
+    public string QuickPatchHeader => Selected is null
+        ? string.Empty
+        : Selected.UseRepentogon && PerProfileBuild ? "REPENTOGON fixes" : "Retail fixes";
+
+    /// <summary>Reuses the Build tab's toggle, so the prompts and drift handling are the same.</summary>
+    public RelayCommand TogglePatchCommand => _shell.BuildVariants.TogglePatchCommand;
+
+    private void RefreshQuickPatches()
+    {
+        QuickPatches.Clear();
+
+        var syncRoot = _shell.Config?.SyncRoot;
+        if (Selected is not null && !string.IsNullOrWhiteSpace(syncRoot))
+        {
+            var wanted = Selected.UseRepentogon && PerProfileBuild
+                ? Core.Models.PatchTarget.Repentogon
+                : Core.Models.PatchTarget.GameRoot;
+
+            var engine = new PatchService(_shell.Process, syncRoot);
+            foreach (var info in engine.DescribeAll())
+            {
+                var state = info.States.FirstOrDefault(t => t.Target == wanted);
+                if (state is null) continue;
+                QuickPatches.Add(new PatchSlotViewModel { Patch = info.Name, State = state });
+            }
+        }
+
+        OnPropertyChanged(nameof(HasQuickPatches));
+        OnPropertyChanged(nameof(QuickPatchHeader));
+        _shell.NotifyQuickPatchesChanged();
+    }
+
     /// <summary>Which library mods the selected profile contains.</summary>
     public ProfileContentsViewModel Contents { get; }
 
@@ -157,6 +202,7 @@ public sealed class ModProfilesViewModel : ObservableObject
             NotesDraft = value?.Notes ?? string.Empty;
             UseRepentogonDraft = value?.UseRepentogon ?? false;
             Contents.Load(value?.Name);
+            RefreshQuickPatches();
             OnPropertyChanged(nameof(HasSelection));
             OnPropertyChanged(nameof(SelectedPathText));
         }
@@ -227,6 +273,7 @@ public sealed class ModProfilesViewModel : ObservableObject
                    ?? Profiles.FirstOrDefault();
 
         OnPropertyChanged(nameof(PerProfileBuild));
+        RefreshQuickPatches();
     }
 
     private void Activate()

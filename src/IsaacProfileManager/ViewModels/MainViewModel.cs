@@ -59,6 +59,31 @@ public sealed class MainViewModel : ObservableObject
     public BuildVariantService BuildVariantService { get; }
     public ConfigStore Store => _store;
 
+    private int _selectedTabIndex;
+
+    /// <summary>
+    /// Which tab is showing. Only the shell knows, and the quick patch toggles
+    /// belong to the Mod profiles tab alone — they sit in the tab strip beside
+    /// the Launch button, which is shared by every tab.
+    /// </summary>
+    public int SelectedTabIndex
+    {
+        get => _selectedTabIndex;
+        set
+        {
+            if (SetField(ref _selectedTabIndex, value)) OnPropertyChanged(nameof(ShowQuickPatches));
+        }
+    }
+
+    public bool ShowQuickPatches => SelectedTabIndex == 0 && ModProfiles.HasQuickPatches;
+
+    /// <summary>
+    /// The profiles tab owns which patches are relevant, but the panel showing
+    /// them lives in the tab strip, which is the shell's. Without this the panel
+    /// would keep whatever it decided at startup as the selection changed.
+    /// </summary>
+    public void NotifyQuickPatchesChanged() => OnPropertyChanged(nameof(ShowQuickPatches));
+
     public ModProfilesViewModel ModProfiles { get; }
     public BuildVariantsViewModel BuildVariants { get; }
     public WorkshopViewModel Workshop { get; }
