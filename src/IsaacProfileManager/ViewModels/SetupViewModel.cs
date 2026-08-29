@@ -12,12 +12,18 @@ namespace IsaacProfileManager.ViewModels;
 /// </summary>
 public sealed class SetupViewModel : ObservableObject
 {
+    /// <summary>The folder the profiles get, created inside whatever parent the user picks.</summary>
+    private const string ProfilesFolderName = "IsaacProfiles";
+
+    /// <summary>Used when someone importing a share code never names a profile of their own.</summary>
+    private const string DefaultProfileName = "my-mods";
+
     private readonly MainViewModel _shell;
 
     private string _isaacExe = string.Empty;
     private string _syncRoot = string.Empty;
     private string _launcherExe = string.Empty;
-    private string _firstProfile = "my-mods";
+    private string _firstProfile = DefaultProfileName;
     private bool _copyExistingMods = true;
     private bool _perProfileBuild;
     private bool _ownsOnSteam = true;
@@ -63,6 +69,21 @@ public sealed class SetupViewModel : ObservableObject
     {
         get => _firstProfile;
         set { if (SetField(ref _firstProfile, value)) Revalidate(); }
+    }
+
+    /// <summary>
+    /// The profile setup actually creates. Someone arriving with a share code
+    /// never sees the name box, but <c>mods\</c> still has to point somewhere and
+    /// their current mods still have to land in a profile, so fall back to a name.
+    /// </summary>
+    private string EffectiveFirstProfile
+    {
+        get
+        {
+            var name = FirstProfile.Trim();
+            if (name.Length > 0) return name;
+            return ImportAfterSetup ? DefaultProfileName : string.Empty;
+        }
     }
 
     /// <summary>Copy whatever is in mods\ now into the first profile, so nothing is lost.</summary>
@@ -124,7 +145,7 @@ public sealed class SetupViewModel : ObservableObject
     private SetupPlan BuildPlan() => new(
         IsaacExe: IsaacExe,
         SyncRoot: SyncRoot,
-        FirstProfile: FirstProfile.Trim(),
+        FirstProfile: EffectiveFirstProfile,
         LauncherExe: LauncherExe.Length == 0 ? null : LauncherExe,
         PerProfileBuild: PerProfileBuild,
         OwnsOnSteam: OwnsOnSteam,
@@ -136,6 +157,7 @@ public sealed class SetupViewModel : ObservableObject
         OnPropertyChanged(nameof(ProblemsText));
         OnPropertyChanged(nameof(HasProblems));
         OnPropertyChanged(nameof(ExistingModsNote));
+        OnPropertyChanged(nameof(ImportProfileNote));
     }
 
     /// <summary>Fill everything in from the machine, so most people press one button.</summary>
@@ -166,8 +188,8 @@ public sealed class SetupViewModel : ObservableObject
             // Default beside the drive root, deliberately outside the game folder.
             var root = Path.GetPathRoot(install.GameDir);
             SyncRoot = string.IsNullOrWhiteSpace(root)
-                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "IsaacProfiles")
-                : Path.Combine(root, "IsaacProfiles");
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), ProfilesFolderName)
+                : Path.Combine(root, ProfilesFolderName);
         }
 
         Revalidate();
@@ -187,7 +209,23 @@ public sealed class SetupViewModel : ObservableObject
     private void BrowseSyncRoot()
     {
         var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Choose where your mod profiles live" };
-        if (dialog.ShowDialog() == true) SyncRoot = dialog.FolderName;
+        if (dialog.ShowDialog() != true) return;
+
+        // The picker answers with the parent the user pointed at. Give the
+        // profiles their own folder inside it rather than scattering them into
+        // a drive root or Documents, where every profile would look like a
+        // stray folder — and where Isaac's mods\ junction would be pointing at
+        // someone's whole home directory.
+        SyncRoot = InsideProfilesFolder(dialog.FolderName);
+    }
+
+    /// <summary>Append the profiles folder unless the chosen path already is one.</summary>
+    private static string InsideProfilesFolder(string chosen)
+    {
+        var trimmed = chosen.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return string.Equals(Path.GetFileName(trimmed), ProfilesFolderName, StringComparison.OrdinalIgnoreCase)
+            ? chosen
+            : Path.Combine(chosen, ProfilesFolderName);
     }
 
     private void BrowseLauncher()
@@ -262,8 +300,25 @@ public sealed class SetupViewModel : ObservableObject
     public bool ImportAfterSetup
     {
         get => _importAfterSetup;
-        set => SetField(ref _importAfterSetup, value);
+        set
+        {
+            if (!SetField(ref _importAfterSetup, value)) return;
+            OnPropertyChanged(nameof(StartFresh));
+            Revalidate();
+        }
     }
+
+    /// <summary>The other half of the step 3 choice — naming a profile yourself.</summary>
+    public bool StartFresh
+    {
+        get => !_importAfterSetup;
+        set { if (value) ImportAfterSetup = false; }
+    }
+
+    /// <summary>Says which profile setup makes for you when you are importing instead of naming one.</summary>
+    public string ImportProfileNote =>
+        $"Setup still makes a profile named '{EffectiveFirstProfile}' to hold the mods you have now, " +
+        "so nothing is lost. The imported profile is added beside it.";
 
     /// <summary>Open the import dialog once setup has produced a config to import into.</summary>
     private void OpenImport()

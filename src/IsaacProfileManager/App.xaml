@@ -114,6 +114,13 @@
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
             </Style>
 
+            <Style TargetType="RadioButton">
+                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                <Setter Property="FontFamily" Value="Segoe UI"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+            </Style>
+
             <!-- ComboBox is templated in full: the stock one ignores Background
                  and renders light grey against the dark panels. -->
             <Style TargetType="ComboBoxItem">

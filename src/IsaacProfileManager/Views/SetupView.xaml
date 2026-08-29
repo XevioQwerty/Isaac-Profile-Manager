@@ -30,7 +30,7 @@
                 <StackPanel>
                     <TextBlock Text="2 · Where your profiles live" Style="{StaticResource Heading}"/>
                     <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                               Text="One folder holds every profile and your mod library. This is what you sync or share. It must be outside the game directory."/>
+                               Text="One folder holds every profile and your mod library. This is what you sync or share. Point Browse at a parent folder and an IsaacProfiles folder is made inside it. It must be outside the game directory."/>
                     <Grid Margin="0,0,0,4">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -42,17 +42,34 @@
                 </StackPanel>
             </Border>
 
-            <!-- 3. First profile -->
+            <!-- 3. First profile — either named here, or brought in by a share code. -->
             <Border Style="{StaticResource Card}">
                 <StackPanel>
                     <TextBlock Text="3 · Your first profile" Style="{StaticResource Heading}"/>
-                    <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                               Text="Name it after what it is for — coop-with-alex, heavy-modded, no-mods. You can add more at any time."/>
-                    <TextBox Text="{Binding FirstProfile, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10"/>
+
+                    <RadioButton GroupName="FirstProfileSource" Content="Start a new profile"
+                                 IsChecked="{Binding StartFresh}"/>
+                    <StackPanel Margin="22,6,0,10"
+                                Visibility="{Binding StartFresh, Converter={StaticResource BoolToVisible}}">
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Name it after what it is for — coop-with-alex, heavy-modded, no-mods. You can add more at any time."/>
+                        <TextBox Text="{Binding FirstProfile, UpdateSourceTrigger=PropertyChanged}"/>
+                    </StackPanel>
+
+                    <RadioButton GroupName="FirstProfileSource" IsChecked="{Binding ImportAfterSetup}"
+                                 Content="I have a share code or profile from someone"/>
+                    <StackPanel Margin="22,6,0,10"
+                                Visibility="{Binding ImportAfterSetup, Converter={StaticResource BoolToVisible}}">
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap"
+                                   Text="Setup finishes first, then the import opens. It downloads whatever the profile needs from the Workshop and builds it for you."/>
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Text="{Binding ImportProfileNote}"/>
+                    </StackPanel>
 
                     <CheckBox Content="Copy the mods I have installed now into this profile"
-                              IsChecked="{Binding CopyExistingMods}" Margin="0,0,0,6"/>
-                    <TextBlock Text="{Binding ExistingModsNote}" Style="{StaticResource Dim}" Margin="22,0,0,0"/>
+                              IsChecked="{Binding CopyExistingMods}" Margin="0,4,0,6"/>
+                    <TextBlock Text="{Binding ExistingModsNote}" Style="{StaticResource Dim}"
+                               TextWrapping="Wrap" Margin="22,0,0,0"/>
                 </StackPanel>
             </Border>
 
@@ -89,11 +106,6 @@
                     </Border>
 
                     <StackPanel Orientation="Horizontal">
-                        <CheckBox IsChecked="{Binding ImportAfterSetup}" Margin="0,0,0,6"
-                                  Content="I have a share code or profile from someone — import it after setup"/>
-                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,10"
-                                   Text="Setup finishes first, then the import opens. It downloads whatever the profile needs from the Workshop and builds it for you."/>
-
                         <Button Content="Set everything up" Style="{StaticResource PrimaryButton}"
                                 Command="{Binding RunCommand}" Margin="0,0,12,0" Padding="20,9"/>
                         <TextBlock Text="{Binding Progress}" Style="{StaticResource Mono}" VerticalAlignment="Center"/>
