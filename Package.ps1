@@ -71,7 +71,20 @@ Copy-Item (Join-Path $publishDir $helperExe) $portable -Force
 Copy-Item (Join-Path $root 'README.md')      $portable -Force
 Copy-Item (Join-Path $root 'LICENSE')        $portable -Force
 
-$staged = Get-ChildItem $portable | Measure-Object -Property Length -Sum
+# The bundle: third-party pieces people would otherwise hunt down, and the
+# patches we ship ready to install. Optional on purpose - a build without it
+# still works, the app just has nothing to offer under "included with this app".
+$bundled = Join-Path $root 'bundled'
+if (Test-Path $bundled) {
+    Copy-Item $bundled (Join-Path $portable 'bundled') -Recurse -Force
+    $bundleSize = (Get-ChildItem (Join-Path $portable 'bundled') -Recurse -File |
+                   Measure-Object -Property Length -Sum).Sum
+    Write-Host ("  Bundled {0:N1} MB of extras" -f ($bundleSize / 1MB)) -ForegroundColor Gray
+} else {
+    Write-Host '  No bundled\ folder; shipping without the extras.' -ForegroundColor Yellow
+}
+
+$staged = Get-ChildItem $portable -Recurse -File | Measure-Object -Property Length -Sum
 Write-Host ("  Staged {0} files, {1:N0} MB" -f $staged.Count, ($staged.Sum / 1MB)) -ForegroundColor Gray
 
 # Shipping a mismatched pair is the failure nobody can diagnose from the outside,

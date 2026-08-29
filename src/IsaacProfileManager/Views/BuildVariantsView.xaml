@@ -104,6 +104,71 @@
                 </StackPanel>
             </Border>
 
+            <!-- What came with the app -->
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Included with this app" Style="{StaticResource Heading}"/>
+                    <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,12"
+                               Text="The pieces for modded online play, so they do not have to be hunted down. Adding one copies it into your own patches, where it behaves like anything else you added."/>
+
+                    <!-- Ready-made patches -->
+                    <ItemsControl ItemsSource="{Binding BundledPatches}"
+                                  Visibility="{Binding HasBundledPatches, Converter={StaticResource BoolToVisible}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="#15151A" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                                        CornerRadius="4" Padding="12" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel Grid.Column="0" Margin="0,0,16,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14"/>
+                                            <TextBlock Text="{Binding Description}" Style="{StaticResource Dim}"
+                                                       TextWrapping="Wrap" Margin="0,3,0,0"
+                                                       Visibility="{Binding Description, Converter={StaticResource StringToVisible}}"/>
+                                        </StackPanel>
+
+                                        <Button Grid.Column="1" Content="Add" MinWidth="86" VerticalAlignment="Center"
+                                                Style="{StaticResource PrimaryButton}"
+                                                Command="{Binding DataContext.AddBundledCommand,
+                                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanInstall, Converter={StaticResource BoolToVisible}}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding StateText}" Style="{StaticResource Dim}"
+                                                   VerticalAlignment="Center"
+                                                   Visibility="{Binding StateText, Converter={StaticResource StringToVisible}}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- The executable patcher, which is a tool rather than a patch -->
+                    <Border Background="#15151A" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                            CornerRadius="4" Padding="12"
+                            Visibility="{Binding HasOnlineTool, Converter={StaticResource BoolToVisible}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Margin="0,0,16,0" VerticalAlignment="Center">
+                                <TextBlock Text="Modded online patcher" FontWeight="SemiBold" FontSize="14"/>
+                                <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,3,0,0"
+                                           Text="Edits the game executable so mods can be used online. A separate tool with its own window, not part of this app - so the patch list cannot undo it. Your isaac-ng.exe is copied aside before it runs."/>
+                            </StackPanel>
+
+                            <Button Grid.Column="1" Content="Open" MinWidth="86" VerticalAlignment="Center"
+                                    Command="{Binding RunOnlineToolCommand}"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Border>
+
             <!-- Patches -->
             <Border Style="{StaticResource Card}">
                 <StackPanel>

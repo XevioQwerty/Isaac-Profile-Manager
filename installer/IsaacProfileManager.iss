@@ -71,6 +71,10 @@ Source: "{#SourceDir}\{#AppExe}";    DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\{#HelperExe}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\README.md";    DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "{#SourceDir}\LICENSE";      DestDir: "{app}"; Flags: ignoreversion
+; The bundled tools and ready-made patches. skipifsourcedoesntexist so a build
+; staged without them still produces an installer.
+Source: "{#SourceDir}\bundled\*"; DestDir: "{app}\bundled"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#AppName}";       Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"

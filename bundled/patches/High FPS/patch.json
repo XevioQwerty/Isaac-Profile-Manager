@@ -1,0 +1,10 @@
+{
+  "SchemaVersion": 1,
+  "Name": "High FPS",
+  "Description": "Renders above the game's 60 FPS cap at your display's refresh rate, interpolating between the 30 Hz logic ticks. Game speed is unchanged. Needs a display above 60 Hz with vsync off or set to its real refresh rate. Built for v1.9.7.17; on a build it does not recognise it patches nothing.",
+  "Target": "GameRoot",
+  "Delete": [],
+  "Volatile": [
+    "isaac-highfps.ini"
+  ]
+}
