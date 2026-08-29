@@ -65,7 +65,10 @@
                         <ListBox ItemsSource="{Binding Backups}" SelectedItem="{Binding SelectedBackup}" MaxHeight="130" Margin="0,0,0,10"/>
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Back up now" Command="{Binding BackupNowCommand}" Margin="0,0,8,0"/>
-                            <Button Content="Restore selected" Command="{Binding RestoreCommand}"/>
+                            <Button Content="Restore selected" Command="{Binding RestoreCommand}" Margin="0,0,8,0"/>
+                            <Button Content="Delete selected" Command="{Binding DeleteBackupCommand}" Margin="0,0,8,0"
+                                    ToolTip="Deletes that backup folder for good. Nothing else in this tab is unrecoverable."/>
+                            <Button Content="Open backups folder" Command="{Binding OpenBackupsFolderCommand}"/>
                         </StackPanel>
                     </StackPanel>
                 </Border>

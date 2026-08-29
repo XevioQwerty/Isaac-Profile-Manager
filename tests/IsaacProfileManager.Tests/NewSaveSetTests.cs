@@ -172,6 +172,62 @@ public class NewSaveSetTests
                                               "rep+persistentgamedata2.dat")));
     }
 
+    // --- Deleting a backup --------------------------------------------------
+
+    [Fact]
+    public void DeleteBackup_RemovesOnlyThatBackup()
+    {
+        using var temp = new TempDir();
+        var (service, _, remote) = Build(temp);
+        GiveVanillaSave(remote);
+
+        var first = Path.GetFileName(service.BackupLive("one"));
+        System.Threading.Thread.Sleep(1100);   // the folder name is stamped to the second
+        var second = Path.GetFileName(service.BackupLive("two"));
+
+        service.DeleteBackup(first);
+
+        Assert.DoesNotContain(first, service.ListBackups());
+        Assert.Contains(second, service.ListBackups());
+    }
+
+    [Fact]
+    public void DeleteBackup_RefusesWhileIsaacIsRunning()
+    {
+        using var temp = new TempDir();
+        var (service, process, remote) = Build(temp);
+        GiveVanillaSave(remote);
+        var name = Path.GetFileName(service.BackupLive("one"));
+
+        // A backup taken seconds ago may hold the only copy of the run in play.
+        process.Running = true;
+        Assert.Throws<UnsafePathException>(() => service.DeleteBackup(name));
+        Assert.Contains(name, service.ListBackups());
+    }
+
+    [Fact]
+    public void DeleteBackup_RefusesAnythingOutsideTheBackupFolder()
+    {
+        using var temp = new TempDir();
+        var (service, _, _) = Build(temp);
+
+        Assert.ThrowsAny<Exception>(() => service.DeleteBackup(@"..\..\sync"));
+    }
+
+    [Fact]
+    public void MeasureBackup_ReportsWhatItHolds()
+    {
+        using var temp = new TempDir();
+        var (service, _, remote) = Build(temp);
+        GiveVanillaSave(remote);
+        var name = Path.GetFileName(service.BackupLive("one"));
+
+        var (files, bytes) = service.MeasureBackup(name);
+
+        Assert.Equal(1, files);
+        Assert.True(bytes > 0);
+    }
+
     [Fact]
     public void CaptureInto_RefusesWhileIsaacIsRunningIsNotItsJob_ButActivateStillChecks()
     {

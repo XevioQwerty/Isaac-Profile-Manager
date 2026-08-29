@@ -502,6 +502,46 @@ public sealed class SaveSetService
         return backup;
     }
 
+    /// <summary>
+    /// Delete one backup folder for good.
+    ///
+    /// The only genuinely destructive call in this service: everywhere else a
+    /// "delete" is a move into here. Backups accumulate one per swap and are
+    /// the last copy of whatever they hold, so this is offered rather than done
+    /// automatically, one at a time, and never while Isaac is running — a
+    /// backup taken seconds ago may be the only copy of the run in progress.
+    /// </summary>
+    public void DeleteBackup(string backupName)
+    {
+        if (string.IsNullOrWhiteSpace(backupName) || backupName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new ArgumentException($"'{backupName}' is not a backup name.", nameof(backupName));
+        if (_process.IsIsaacRunning())
+            throw new UnsafePathException("Isaac is running. Close it before deleting a save backup.");
+
+        var path = Path.Combine(BackupRoot, backupName);
+
+        // Confine it to the backup folder: the name comes from a list we
+        // produced, but a delete is not the place to assume that holds.
+        var root = Path.GetFullPath(BackupRoot).TrimEnd(Path.DirectorySeparatorChar);
+        if (!Path.GetFullPath(path).StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new UnsafePathException($"'{backupName}' is not inside the backup folder.");
+
+        if (!Directory.Exists(path))
+            throw new UnsafePathException($"No such backup: {path}");
+
+        Directory.Delete(path, recursive: true);
+    }
+
+    /// <summary>How much one backup holds, for deciding whether to keep it.</summary>
+    public (int Files, long Bytes) MeasureBackup(string backupName)
+    {
+        var path = Path.Combine(BackupRoot, backupName);
+        if (!Directory.Exists(path)) return (0, 0);
+
+        var files = new DirectoryInfo(path).GetFiles("*", SearchOption.AllDirectories);
+        return (files.Length, files.Sum(f => f.Length));
+    }
+
     /// <summary>Restore a timestamped backup over the live folder, backing up what is there first.</summary>
     public string RestoreBackup(string backupName)
     {

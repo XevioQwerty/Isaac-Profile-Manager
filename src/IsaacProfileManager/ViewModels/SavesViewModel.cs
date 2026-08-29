@@ -80,7 +80,14 @@ public sealed class SavesViewModel : ObservableObject
         DeleteSetCommand = new RelayCommand(DeleteSet, () => Selected is not null);
         StartFreshCommand = new RelayCommand(StartFresh, () => Service is not null && NewSetName.Trim().Length > 0);
         CaptureIntoCommand = new RelayCommand(CaptureInto, () => Selected is not null);
+        DeleteBackupCommand = new RelayCommand(DeleteBackup, () => SelectedBackup is not null);
+        OpenBackupsFolderCommand = new RelayCommand(OpenBackupsFolder, () => Service is not null);
     }
+
+    /// <summary>Delete the selected backup. The one destructive action in this tab.</summary>
+    public RelayCommand DeleteBackupCommand { get; }
+
+    public RelayCommand OpenBackupsFolderCommand { get; }
 
     /// <summary>Begin a save set with no save in it, for a fresh unlock state.</summary>
     public RelayCommand StartFreshCommand { get; }
@@ -481,6 +488,38 @@ public sealed class SavesViewModel : ObservableObject
             var filled = service.CaptureInto(set);
             _shell.Report($"Captured into '{filled.Name}' - {filled.Files.Count} files, {filled.SlotsText()}.");
         });
+    }
+
+    private void DeleteBackup()
+    {
+        var service = Service;
+        if (service is null || SelectedBackup is null) return;
+
+        var name = SelectedBackup;
+        var (files, bytes) = service.MeasureBackup(name);
+
+        if (MessageBox.Show(
+                $"Delete the backup '{name}'?\n\n" +
+                $"{files} file(s), {bytes / 1024d:N0} KB.\n\n" +
+                "This one is not recoverable. Backups are taken automatically before every swap, so " +
+                "this may be the only copy of the saves it holds.",
+                "Delete backup", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        Run(() =>
+        {
+            service.DeleteBackup(name);
+            _shell.Report($"Deleted the backup '{name}'.");
+        });
+    }
+
+    private void OpenBackupsFolder()
+    {
+        var service = Service;
+        if (service is null) return;
+
+        Directory.CreateDirectory(service.BackupRoot);
+        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{service.BackupRoot}\"") { UseShellExecute = true });
     }
 
     private void Activate()
