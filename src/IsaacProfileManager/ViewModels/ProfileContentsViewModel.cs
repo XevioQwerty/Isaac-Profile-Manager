@@ -6,46 +6,61 @@ using IsaacProfileManager.Core.Services;
 
 namespace IsaacProfileManager.ViewModels;
 
-/// <summary>A library mod as it appears in the profile's contents editor.</summary>
-public sealed class LibraryEntryViewModel : ObservableObject
+/// <summary>One mod the profile contains, with the switch that loads or skips it.</summary>
+public sealed class ProfileModViewModel : ObservableObject
 {
-    private bool _included;
-    private bool _disabled;
+    private bool _enabled = true;
 
     public required string Entry { get; init; }
     public required string DisplayName { get; init; }
     public string? PreviewPath { get; init; }
     public string Description { get; init; } = string.Empty;
 
-    /// <summary>Ticked entries are what the profile will contain after Apply.</summary>
-    public bool Included
-    {
-        get => _included;
-        set { if (SetField(ref _included, value)) OnPropertyChanged(nameof(StateText)); }
-    }
+    /// <summary>Raised when the switch is thrown, so the change lands immediately.</summary>
+    public Action<ProfileModViewModel>? Toggled { get; init; }
 
     /// <summary>
-    /// In the profile but switched off: the manifest keeps listing it, and no
-    /// junction is laid down, so Isaac cannot load it. Meaningless unless
-    /// <see cref="Included"/> — a mod that is not a member is not "off", it is absent.
+    /// On means the mod is linked into the folder Isaac reads. Off leaves it in
+    /// the profile's manifest but takes the junction away, which is what makes
+    /// bisecting a desync reversible.
     /// </summary>
-    public bool Disabled
+    public bool Enabled
     {
-        get => _disabled;
-        set { if (SetField(ref _disabled, value)) OnPropertyChanged(nameof(StateText)); }
+        get => _enabled;
+        set
+        {
+            if (!SetField(ref _enabled, value)) return;
+            OnPropertyChanged(nameof(StateText));
+            Toggled?.Invoke(this);
+        }
     }
 
-    public string StateText => !Included ? "" : Disabled ? "OFF" : "";
+    /// <summary>Set without running the toggle, for loading state off disk.</summary>
+    public void SetEnabledQuietly(bool enabled)
+    {
+        _enabled = enabled;
+        OnPropertyChanged(nameof(Enabled));
+        OnPropertyChanged(nameof(StateText));
+    }
+
+    public string StateText => Enabled ? string.Empty : "OFF";
 
     public string SubtitleText => string.Equals(Entry, DisplayName, StringComparison.OrdinalIgnoreCase) ? "" : Entry;
 }
 
 /// <summary>
-/// Edits which library mods a profile contains.
+/// The mods one profile contains.
 ///
-/// The manifest is the only membership mechanism — a <c>disable.it</c> marker
-/// written through a junction would land in the shared library and affect every
-/// profile linking that mod, so excluding a mod means unticking it here.
+/// Lists the profile's own members and nothing else. It used to show the whole
+/// library with a tick against the members, which meant a 26-mod profile was
+/// 26 ticks scattered through 42 rows and you could not see what the profile
+/// held. Adding and removing mods belongs to the Library tab, which is where
+/// you choose from everything you own; this is where you look at one profile
+/// and switch pieces of it off.
+///
+/// Switching off is a manifest change, never a <c>disable.it</c> marker: a
+/// marker written through the junction lands in the shared library and would
+/// switch that mod off in every profile linking it.
 /// </summary>
 public sealed class ProfileContentsViewModel : ObservableObject
 {
@@ -55,42 +70,31 @@ public sealed class ProfileContentsViewModel : ObservableObject
     private string _search = string.Empty;
     private string _statusText = string.Empty;
     private bool _hasLibrary;
+    private bool _suspendToggles;
 
     public ProfileContentsViewModel(MainViewModel shell)
     {
         _shell = shell;
 
-        View = CollectionViewSource.GetDefaultView(Entries);
-        View.Filter = o => o is LibraryEntryViewModel e && Matches(e);
+        View = CollectionViewSource.GetDefaultView(Mods);
+        View.Filter = o => o is ProfileModViewModel m && Matches(m);
 
-        ApplyCommand = new RelayCommand(Apply, () => HasLibrary && ProfileName.Length > 0);
-        IncludeAllCommand = new RelayCommand(() => SetVisible(true));
-        IncludeNoneCommand = new RelayCommand(() => SetVisible(false));
         AdoptCommand = new RelayCommand(AdoptRealFolders, () => RealFolders.Count > 0);
         AdoptMarkedDisabledCommand = new RelayCommand(AdoptMarkedDisabled, () => MarkedDisabled.Count > 0);
-        EnableAllCommand = new RelayCommand(EnableAll, () => Entries.Any(e => e.Included && e.Disabled));
+        EnableAllCommand = new RelayCommand(EnableAll, () => Mods.Any(m => !m.Enabled));
     }
 
-    /// <summary>Mods switched off from the in-game menu, waiting to be made a profile choice.</summary>
-    public ObservableCollection<string> MarkedDisabled { get; } = new();
-
-    public bool HasMarkedDisabled => MarkedDisabled.Count > 0;
-
-    public string MarkedDisabledText => MarkedDisabled.Count == 0
-        ? string.Empty
-        : $"{MarkedDisabled.Count} mod(s) here were switched off from the in-game menu: " +
-          string.Join(", ", MarkedDisabled);
-
-    public ObservableCollection<LibraryEntryViewModel> Entries { get; } = new();
+    /// <summary>The profile's members, in library order.</summary>
+    public ObservableCollection<ProfileModViewModel> Mods { get; } = new();
 
     /// <summary>Real copies still sitting in the profile, with what they look like a duplicate of.</summary>
     public ObservableCollection<string> RealFolders { get; } = new();
 
+    /// <summary>Mods switched off from the in-game menu, waiting to be made a profile choice.</summary>
+    public ObservableCollection<string> MarkedDisabled { get; } = new();
+
     public ICollectionView View { get; }
 
-    public RelayCommand ApplyCommand { get; }
-    public RelayCommand IncludeAllCommand { get; }
-    public RelayCommand IncludeNoneCommand { get; }
     public RelayCommand AdoptCommand { get; }
     public RelayCommand AdoptMarkedDisabledCommand { get; }
     public RelayCommand EnableAllCommand { get; }
@@ -108,6 +112,14 @@ public sealed class ProfileContentsViewModel : ObservableObject
     }
 
     public bool HasRealFolders => RealFolders.Count > 0;
+    public bool HasMarkedDisabled => MarkedDisabled.Count > 0;
+    public bool HasMods => Mods.Count > 0;
+    public bool IsEmpty => HasLibrary && Mods.Count == 0;
+
+    public string MarkedDisabledText => MarkedDisabled.Count == 0
+        ? string.Empty
+        : $"{MarkedDisabled.Count} mod(s) here were switched off from the in-game menu: " +
+          string.Join(", ", MarkedDisabled);
 
     public string Search
     {
@@ -125,10 +137,10 @@ public sealed class ProfileContentsViewModel : ObservableObject
     {
         get
         {
-            var included = Entries.Count(e => e.Included);
-            var off = Entries.Count(e => e.Included && e.Disabled);
-            var summary = $"{included} of {Entries.Count} library mods in this profile";
-            return off > 0 ? $"{summary} — {off} switched off" : summary;
+            if (Mods.Count == 0) return string.Empty;
+            var off = Mods.Count(m => !m.Enabled);
+            var loaded = Mods.Count - off;
+            return off > 0 ? $"{loaded} loaded, {off} switched off" : $"{loaded} mod(s)";
         }
     }
 
@@ -137,16 +149,16 @@ public sealed class ProfileContentsViewModel : ObservableObject
             ? null
             : new ModLibraryService(_shell.Junctions, _shell.Config!.SyncRoot!);
 
-    private bool Matches(LibraryEntryViewModel entry) =>
+    private bool Matches(ProfileModViewModel mod) =>
         Search.Length == 0 ||
-        entry.DisplayName.Contains(Search, StringComparison.OrdinalIgnoreCase) ||
-        entry.Entry.Contains(Search, StringComparison.OrdinalIgnoreCase);
+        mod.DisplayName.Contains(Search, StringComparison.OrdinalIgnoreCase) ||
+        mod.Entry.Contains(Search, StringComparison.OrdinalIgnoreCase);
 
     public void Load(string? profileName)
     {
         ProfileName = profileName ?? string.Empty;
 
-        Entries.Clear();
+        Mods.Clear();
         RealFolders.Clear();
         MarkedDisabled.Clear();
 
@@ -160,16 +172,16 @@ public sealed class ProfileContentsViewModel : ObservableObject
             return;
         }
 
-        var included = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var members = new List<string>();
         var disabled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var analysis = library.Analyse(profileName);
 
         // Prefer the manifest; fall back to whatever the folder already links to,
-        // so a profile that predates manifests still opens with the right ticks.
+        // so a profile that predates manifests still shows its contents.
         try
         {
             var manifest = library.LoadManifest(profileName);
-            foreach (var mod in manifest.Mods) included.Add(mod);
+            members.AddRange(manifest.Mods);
             foreach (var mod in manifest.Disabled) disabled.Add(mod);
         }
         catch (ConfigSchemaMismatchException ex)
@@ -177,21 +189,22 @@ public sealed class ProfileContentsViewModel : ObservableObject
             StatusText = ex.Message;
         }
 
-        if (included.Count == 0)
-            foreach (var entry in analysis.Where(e => e.IsLink && e.LibraryEntry is not null))
-                included.Add(entry.LibraryEntry!);
+        if (members.Count == 0)
+            members.AddRange(analysis.Where(e => e.IsLink && e.LibraryEntry is not null).Select(e => e.LibraryEntry!));
 
-        foreach (var entry in library.ListEntries())
+        foreach (var entry in members.Distinct(StringComparer.OrdinalIgnoreCase)
+                                     .OrderBy(e => e, StringComparer.OrdinalIgnoreCase))
         {
-            Entries.Add(new LibraryEntryViewModel
+            var mod = new ProfileModViewModel
             {
                 Entry = entry,
                 DisplayName = library.GetCachedName(entry) ?? entry,
                 PreviewPath = library.GetCachedImage(entry),
                 Description = library.GetCachedDescription(entry) ?? string.Empty,
-                Included = included.Contains(entry),
-                Disabled = disabled.Contains(entry),
-            });
+                Toggled = OnModToggled,
+            };
+            mod.SetEnabledQuietly(!disabled.Contains(entry));
+            Mods.Add(mod);
         }
 
         if (_shell.Config is not null)
@@ -217,14 +230,31 @@ public sealed class ProfileContentsViewModel : ObservableObject
     }
 
     /// <summary>
+    /// A switch was thrown. Applied immediately rather than batched behind an
+    /// Apply button: one mod at a time is how a bisect actually goes, and a
+    /// pending change nobody has written is a way to launch the game believing
+    /// a mod is off when it is not.
+    /// </summary>
+    private void OnModToggled(ProfileModViewModel mod)
+    {
+        if (_suspendToggles || _shell.Config is null || ProfileName.Length == 0) return;
+
+        var enabled = mod.Enabled;
+        RunOnProfile(() =>
+        {
+            var result = _shell.ModProfileService.SetDisabled(
+                _shell.Config!, ProfileName, new[] { mod.Entry }, disabled: !enabled);
+
+            _shell.Report(result.Changed.Count == 0
+                ? $"'{mod.DisplayName}' was already {(enabled ? "on" : "off")}."
+                : $"{mod.DisplayName} switched {(enabled ? "on" : "off")} in '{ProfileName}'.");
+        });
+    }
+
+    /// <summary>
     /// Take the mods switched off in-game and make that a property of the
     /// profile: unlink their folders, record them in the manifest, and clear the
     /// markers out of the shared library.
-    ///
-    /// Worth doing rather than leaving alone, because a marker written through a
-    /// junction lands in the library and switches that mod off in every profile
-    /// linking it — and activating any profile deletes markers, so the choice
-    /// would silently evaporate at the next switch.
     /// </summary>
     private void AdoptMarkedDisabled()
     {
@@ -254,7 +284,7 @@ public sealed class ProfileContentsViewModel : ObservableObject
     {
         if (_shell.Config is null || ProfileName.Length == 0) return;
 
-        var off = Entries.Where(e => e.Included && e.Disabled).Select(e => e.Entry).ToList();
+        var off = Mods.Where(m => !m.Enabled).Select(m => m.Entry).ToList();
         if (off.Count == 0) return;
 
         RunOnProfile(() =>
@@ -262,81 +292,6 @@ public sealed class ProfileContentsViewModel : ObservableObject
             var result = _shell.ModProfileService.SetDisabled(_shell.Config!, ProfileName, off, disabled: false);
             _shell.Report("Turned back on " + result.Summary);
         });
-    }
-
-    private void RunOnProfile(Action action)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex)
-        {
-            _shell.Report(ex.Message);
-            MessageBox.Show(ex.Message, "Profile contents", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        finally
-        {
-            var message = _shell.StatusMessage;
-            _shell.Reload();
-            _shell.Report(message);
-        }
-    }
-
-    private void SetVisible(bool included)
-    {
-        foreach (var entry in View.Cast<LibraryEntryViewModel>().ToList()) entry.Included = included;
-        RaiseSummaries();
-    }
-
-    private void Apply()
-    {
-        var library = Library;
-        if (library is null || ProfileName.Length == 0) return;
-
-        var chosen = Entries.Where(e => e.Included).Select(e => e.Entry).ToList();
-
-        try
-        {
-            var manifest = library.LoadManifest(ProfileName);
-            manifest.Mods = chosen;
-
-            // Membership and on/off are edited together here, and a mod that is
-            // no longer a member cannot be "switched off" — leaving it listed
-            // would keep unticked mods coming back off if they were re-added.
-            manifest.Disabled = Entries
-                .Where(e => e.Included && e.Disabled)
-                .Select(e => e.Entry)
-                .ToList();
-
-            library.SaveManifest(ProfileName, manifest);
-
-            var report = library.Materialise(ProfileName, manifest);
-
-            var off = manifest.Disabled.Count;
-            var parts = new List<string>
-            {
-                $"{ProfileName}: {chosen.Count} mods" + (off > 0 ? $" ({off} switched off)" : ""),
-            };
-            if (report.Created.Count > 0) parts.Add($"linked {report.Created.Count}");
-            if (report.Removed.Count > 0) parts.Add($"unlinked {report.Removed.Count}");
-            if (report.Repointed.Count > 0) parts.Add($"repointed {report.Repointed.Count}");
-            if (report.LeftAlone.Count > 0) parts.Add($"left {report.LeftAlone.Count} real folder(s) alone");
-            if (report.MissingFromLibrary.Count > 0) parts.Add($"{report.MissingFromLibrary.Count} not in library");
-
-            _shell.Report(string.Join(" — ", parts));
-        }
-        catch (Exception ex)
-        {
-            _shell.Report(ex.Message);
-            MessageBox.Show(ex.Message, "Profile contents", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-        finally
-        {
-            var message = _shell.StatusMessage;
-            _shell.Reload();
-            _shell.Report(message);
-        }
     }
 
     /// <summary>
@@ -392,11 +347,47 @@ public sealed class ProfileContentsViewModel : ObservableObject
         _shell.Report(message);
     }
 
+    /// <summary>
+    /// Run something that changes the profile, then reload from disk.
+    ///
+    /// Toggles are suspended across the reload: rebuilding the rows sets each
+    /// switch from the manifest, and without this that would fire the toggle
+    /// handler again and write the state back for every mod in the profile.
+    /// </summary>
+    private void RunOnProfile(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Profile contents", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            var message = _shell.StatusMessage;
+            _suspendToggles = true;
+            try
+            {
+                _shell.Reload();
+            }
+            finally
+            {
+                _suspendToggles = false;
+            }
+            _shell.Report(message);
+        }
+    }
+
     private void RaiseSummaries()
     {
         OnPropertyChanged(nameof(SelectionSummary));
         OnPropertyChanged(nameof(HasRealFolders));
         OnPropertyChanged(nameof(HasMarkedDisabled));
         OnPropertyChanged(nameof(MarkedDisabledText));
+        OnPropertyChanged(nameof(HasMods));
+        OnPropertyChanged(nameof(IsEmpty));
     }
 }

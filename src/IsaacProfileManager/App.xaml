@@ -114,6 +114,76 @@
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
             </Style>
 
+            <!--
+                Sliding switch: a track that fills when on, and a thumb that
+                moves across it. Used wherever a boolean is a state you are
+                looking at rather than a choice you are filling in - a row of
+                these reads at a glance in a way a column of ticks does not.
+            -->
+            <Style x:Key="SwitchToggle" TargetType="ToggleButton">
+                <Setter Property="Focusable" Value="True"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Width" Value="40"/>
+                <Setter Property="Height" Value="22"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToggleButton">
+                            <Grid Background="Transparent">
+                                <Border x:Name="Track" CornerRadius="11" Background="#2A2A32"
+                                        BorderBrush="{StaticResource Border}" BorderThickness="1"/>
+                                <Border x:Name="Thumb" Width="16" Height="16" CornerRadius="8"
+                                        Background="#8A8A96" HorizontalAlignment="Left"
+                                        VerticalAlignment="Center" Margin="3,0,0,0">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform x:Name="ThumbShift" X="0"/>
+                                    </Border.RenderTransform>
+                                </Border>
+                                <Border x:Name="FocusRing" CornerRadius="11" BorderThickness="1"
+                                        BorderBrush="{StaticResource Accent}" Visibility="Collapsed"
+                                        Margin="-2"/>
+                            </Grid>
+
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Track" Property="Background" Value="{StaticResource Accent}"/>
+                                    <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                    <Setter TargetName="Thumb" Property="Background" Value="White"/>
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="ThumbShift"
+                                                                 Storyboard.TargetProperty="X"
+                                                                 To="18" Duration="0:0:0.12"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                    <Trigger.ExitActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimation Storyboard.TargetName="ThumbShift"
+                                                                 Storyboard.TargetProperty="X"
+                                                                 To="0" Duration="0:0:0.12"/>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.ExitActions>
+                                </Trigger>
+
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Thumb" Property="Background" Value="White"/>
+                                </Trigger>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="FocusRing" Property="Visibility" Value="Visible"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.4"/>
+                                    <Setter Property="Cursor" Value="Arrow"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style TargetType="RadioButton">
                 <Setter Property="Foreground" Value="{StaticResource Text}"/>
                 <Setter Property="FontFamily" Value="Segoe UI"/>

@@ -165,25 +165,44 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Contents, driven by the shared library -->
+                    <!-- What this profile contains -->
                     <Border Style="{StaticResource Card}" DataContext="{Binding Contents}">
                         <StackPanel>
-                            <TextBlock Text="Mods in this profile" Style="{StaticResource Heading}"/>
+                            <Grid Margin="0,0,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Mods in this profile" Style="{StaticResource Heading}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding SelectionSummary}" Style="{StaticResource Dim}"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
 
-                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                            <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,10"
                                        Visibility="{Binding HasLibrary, Converter={StaticResource BoolToCollapsed}}"
-                                       Text="No library yet. Import your mods on the Workshop tab first — then a profile is just a selection from it."/>
+                                       Text="No library yet. Import your mods on the Workshop tab first - then a profile is a selection from it."/>
 
                             <StackPanel Visibility="{Binding HasLibrary, Converter={StaticResource BoolToVisible}}">
-                                <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
-                                           Text="Ticked mods are linked into the profile from the shared library. Nothing is copied, so a mod costs disk once no matter how many profiles use it. Tick &quot;off&quot; to keep a mod in the profile but stop Isaac loading it - useful for bisecting a desync."/>
+                                <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                           Text="Switch a mod off to keep it in the profile but stop Isaac loading it - the profile still remembers it, so turning it back on is instant. Add and remove mods on the Library tab."/>
+
+                                <!-- Nothing in it yet -->
+                                <Border Background="#15151A" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                                        CornerRadius="4" Padding="16" Margin="0,0,0,10"
+                                        Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisible}}">
+                                    <StackPanel>
+                                        <TextBlock Text="This profile is empty" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap"
+                                                   Text="Open the Library tab, pick this profile in &quot;Building&quot;, and switch on the mods you want in it."/>
+                                    </StackPanel>
+                                </Border>
 
                                 <!-- Migration prompt for profiles that predate the library -->
                                 <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
                                         CornerRadius="4" Padding="10" Margin="0,0,0,10"
                                         Visibility="{Binding HasRealFolders, Converter={StaticResource BoolToVisible}}">
                                     <StackPanel>
-                                        <TextBlock Text="{Binding StatusText}" Margin="0,0,0,6"/>
+                                        <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
                                         <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto" Margin="0,0,0,8">
                                             <ItemsControl ItemsSource="{Binding RealFolders}">
                                                 <ItemsControl.ItemTemplate>
@@ -211,68 +230,62 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Grid Margin="0,0,0,8">
+                                <Grid Margin="0,0,0,8"
+                                      Visibility="{Binding HasMods, Converter={StaticResource BoolToVisible}}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"
-                                             Margin="0,0,8,0"/>
-                                    <Button Grid.Column="1" Content="All" Command="{Binding IncludeAllCommand}" Margin="0,0,6,0"/>
-                                    <Button Grid.Column="2" Content="None" Command="{Binding IncludeNoneCommand}"/>
+                                    <TextBox Grid.Column="0" Margin="0,0,8,0"
+                                             Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Column="1" Content="Turn all back on"
+                                            Command="{Binding EnableAllCommand}"/>
                                 </Grid>
 
-                                <ListBox ItemsSource="{Binding View}" MaxHeight="300" Margin="0,0,0,10">
-                                    <ListBox.ItemTemplate>
+                                <ItemsControl ItemsSource="{Binding View}">
+                                    <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="Auto"/>
-                                                </Grid.ColumnDefinitions>
+                                            <Border Background="#15151A" BorderBrush="{StaticResource Border}"
+                                                    BorderThickness="1" CornerRadius="4" Padding="10,8"
+                                                    Margin="0,0,0,6">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
 
-                                                <CheckBox Grid.Column="0" IsChecked="{Binding Included}"
-                                                          VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                                    <Border Grid.Column="0" Width="40" Height="40" Margin="0,0,12,0"
+                                                            Background="#121216" CornerRadius="4">
+                                                        <Image Stretch="UniformToFill"
+                                                               Source="{Binding PreviewPath, Converter={StaticResource PathToImage}}"/>
+                                                    </Border>
 
-                                                <Image Grid.Column="1" Width="44" Height="44" Margin="0,0,10,0"
-                                                       Stretch="UniformToFill"
-                                                       Source="{Binding PreviewPath, Converter={StaticResource PathToImage}}"/>
-
-                                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
-                                                                   TextTrimming="CharacterEllipsis"/>
-                                                        <Border Background="{StaticResource WarnBrush}" CornerRadius="3"
-                                                                Padding="5,1" Margin="8,0,0,0" VerticalAlignment="Center"
-                                                                Visibility="{Binding StateText, Converter={StaticResource StringToVisible}}">
-                                                            <TextBlock Text="{Binding StateText}" FontSize="10"
-                                                                       FontWeight="Bold" Foreground="White"/>
-                                                        </Border>
+                                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                                                       TextTrimming="CharacterEllipsis"/>
+                                                            <Border Background="{StaticResource WarnBrush}" CornerRadius="3"
+                                                                    Padding="5,1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                                    Visibility="{Binding StateText, Converter={StaticResource StringToVisible}}">
+                                                                <TextBlock Text="{Binding StateText}" FontSize="10"
+                                                                           FontWeight="Bold" Foreground="White"/>
+                                                            </Border>
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding SubtitleText}" Style="{StaticResource Mono}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   Visibility="{Binding SubtitleText, Converter={StaticResource StringToVisible}}"/>
                                                     </StackPanel>
-                                                    <TextBlock Text="{Binding SubtitleText}" Style="{StaticResource Mono}"
-                                                               Visibility="{Binding SubtitleText, Converter={StaticResource StringToVisible}}"/>
-                                                </StackPanel>
 
-                                                <CheckBox Grid.Column="3" Content="off" IsChecked="{Binding Disabled}"
-                                                          IsEnabled="{Binding Included}" VerticalAlignment="Center"
-                                                          Margin="10,0,0,0"
-                                                          ToolTip="In the profile, but not linked into the folder Isaac reads. The profile still remembers it."/>
-                                            </Grid>
+                                                    <ToggleButton Grid.Column="2" Style="{StaticResource SwitchToggle}"
+                                                                  IsChecked="{Binding Enabled}" VerticalAlignment="Center"
+                                                                  Margin="12,0,0,0"
+                                                                  ToolTip="On means Isaac loads it. Off keeps it in the profile but takes the folder away."/>
+                                                </Grid>
+                                            </Border>
                                         </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-
-                                <StackPanel Orientation="Horizontal">
-                                    <Button Content="Apply to profile" Style="{StaticResource PrimaryButton}"
-                                            Command="{Binding ApplyCommand}" Margin="0,0,8,0"/>
-                                    <Button Content="Turn all back on" Command="{Binding EnableAllCommand}"
-                                            Margin="0,0,12,0"/>
-                                    <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Dim}"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                         </StackPanel>
                     </Border>
