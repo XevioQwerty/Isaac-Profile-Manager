@@ -17,14 +17,24 @@
                         <TextBlock Text="{Binding Description}" Style="{StaticResource Dim}" TextWrapping="Wrap"
                                    Margin="0,3,0,0"
                                    Visibility="{Binding Description, Converter={StaticResource StringToVisible}}"/>
-                        <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Mono}" Margin="0,3,0,0"/>
+                        <TextBlock Text="{Binding FolderName}" Style="{StaticResource Mono}" Margin="0,2,0,0"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                   ToolTip="The folder this came from, inside your patches folder."/>
+                        <TextBlock Text="{Binding SummaryText}" Style="{StaticResource Dim}" Margin="0,3,0,0"/>
 
-                        <Button Content="Remove" HorizontalAlignment="Left" Margin="0,8,0,0"
-                                Command="{Binding DataContext.RemovePatchCommand,
-                                          RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                CommandParameter="{Binding}"
-                                Visibility="{Binding CanRemove, Converter={StaticResource BoolToVisible}}"
-                                ToolTip="Delete this patch folder. The game is not touched."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Content="Rename" Margin="0,0,8,0"
+                                    Command="{Binding DataContext.RenamePatchCommand,
+                                              RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    ToolTip="Call it something readable. The folder on disk keeps its own name."/>
+                            <Button Content="Remove"
+                                    Command="{Binding DataContext.RemovePatchCommand,
+                                              RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    CommandParameter="{Binding}"
+                                    Visibility="{Binding CanRemove, Converter={StaticResource BoolToVisible}}"
+                                    ToolTip="Delete this patch folder. The game is not touched."/>
+                        </StackPanel>
                     </StackPanel>
 
                     <!-- One slot per folder, applied and reverted independently -->

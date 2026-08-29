@@ -151,9 +151,10 @@ public sealed class ModProfilesViewModel : ObservableObject
 
     public bool HasQuickPatches => QuickPatches.Count > 0;
 
+    /// <summary>Names the folder these switches act on, so "on" is not ambiguous.</summary>
     public string QuickPatchHeader => Selected is null
         ? string.Empty
-        : Selected.UseRepentogon && PerProfileBuild ? "REPENTOGON fixes" : "Retail fixes";
+        : Selected.UseRepentogon && PerProfileBuild ? "REPENTOGON" : "Retail";
 
     /// <summary>Reuses the Build tab's toggle, so the prompts and drift handling are the same.</summary>
     public RelayCommand TogglePatchCommand => _shell.BuildVariants.TogglePatchCommand;
@@ -174,7 +175,13 @@ public sealed class ModProfilesViewModel : ObservableObject
             {
                 var state = info.States.FirstOrDefault(t => t.Target == wanted);
                 if (state is null) continue;
-                QuickPatches.Add(new PatchSlotViewModel { Patch = info.Name, State = state });
+                QuickPatches.Add(new PatchSlotViewModel
+                {
+                    Patch = info.Name,
+                    DisplayName = info.DisplayName,
+                    ShortName = info.ShortName,
+                    State = state,
+                });
             }
         }
 

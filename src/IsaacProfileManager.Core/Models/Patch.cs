@@ -71,6 +71,31 @@ public sealed record PatchInfo(
 {
     public double SizeMb => Math.Round(SizeBytes / 1024d / 1024d, 1);
 
+    /// <summary>
+    /// What to call this on screen.
+    ///
+    /// A patch folder is named by whoever packaged the release, so it arrives as
+    /// something like <c>TBoIR_Fix_Repair_Steam_V2_Generic</c>. Shown verbatim
+    /// that is unreadable and dominates any row it appears in, so separators
+    /// become spaces and a name set by hand wins outright.
+    /// </summary>
+    public string DisplayName => Prettify(Name);
+
+    /// <summary>Trimmed for places with no room, like the launch bar.</summary>
+    public string ShortName => Shorten(DisplayName, 22);
+
+    internal static string Prettify(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return raw;
+
+        var spaced = raw.Replace('_', ' ').Replace('-', ' ');
+        while (spaced.Contains("  ")) spaced = spaced.Replace("  ", " ");
+        return spaced.Trim();
+    }
+
+    internal static string Shorten(string text, int limit) =>
+        text.Length <= limit ? text : text[..(limit - 1)].TrimEnd() + "\u2026";
+
     public string TargetText => Target == PatchTarget.GameRoot ? "retail install" : "REPENTOGON build";
 
     /// <summary>True when it is laid over at least one of the two folders.</summary>

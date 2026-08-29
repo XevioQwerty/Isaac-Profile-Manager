@@ -10,7 +10,14 @@ namespace IsaacProfileManager.ViewModels;
 /// <summary>One patch against one of the two folders it can be laid over.</summary>
 public sealed class PatchSlotViewModel : ObservableObject
 {
+    /// <summary>The folder name, which is what the service is addressed by.</summary>
     public required string Patch { get; init; }
+
+    /// <summary>What to show instead of it.</summary>
+    public required string DisplayName { get; init; }
+
+    public required string ShortName { get; init; }
+
     public required PatchTargetState State { get; init; }
 
     public PatchTarget Target => State.Target;
@@ -40,7 +47,8 @@ public sealed class PatchItemViewModel : ObservableObject
     public required PatchInfo Info { get; init; }
     public required IReadOnlyList<PatchSlotViewModel> Slots { get; init; }
 
-    public string Name => Info.Name;
+    public string Name => Info.DisplayName;
+    public string FolderName => Info.Name;
     public string Description => Info.Description;
     public string SummaryText => Info.SummaryText;
     public bool IsAppliedAnywhere => Info.IsAppliedAnywhere;
@@ -83,6 +91,8 @@ public sealed class BuildVariantsViewModel : ObservableObject
                                               p => p is PatchItemViewModel { CanRemove: true });
         CollapseJunctionCommand = new RelayCommand(CollapseJunction, () => BuildLinkIsJunction);
         OpenPatchesFolderCommand = new RelayCommand(OpenPatchesFolder, () => PatchEngine is not null);
+        RenamePatchCommand = new RelayCommand(p => RenamePatch(p as PatchItemViewModel),
+                                              p => p is PatchItemViewModel);
     }
 
     /// <summary>
@@ -98,6 +108,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
     public RelayCommand RemovePatchCommand { get; }
     public RelayCommand CollapseJunctionCommand { get; }
     public RelayCommand OpenPatchesFolderCommand { get; }
+    public RelayCommand RenamePatchCommand { get; }
 
     public bool HasPatches => Patches.Count > 0;
     public bool HasNoPatches => Patches.Count == 0;
@@ -141,7 +152,13 @@ public sealed class BuildVariantsViewModel : ObservableObject
                 {
                     Info = info,
                     Slots = info.States
-                        .Select(state => new PatchSlotViewModel { Patch = info.Name, State = state })
+                        .Select(state => new PatchSlotViewModel
+                        {
+                            Patch = info.Name,
+                            DisplayName = info.DisplayName,
+                            ShortName = info.ShortName,
+                            State = state,
+                        })
                         .ToList(),
                 });
             }
@@ -195,7 +212,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
         if (!slot.IsApplied)
         {
             if (MessageBox.Show(
-                    $"Lay '{slot.Patch}' over the {where}?\n\n{targetDir}\n\n" +
+                    $"Lay '{slot.DisplayName}' over the {where}?\n\n{targetDir}\n\n" +
                     "Every file it replaces is copied aside first, and reverting puts them all back. " +
                     "Nothing is deleted.",
                     "Apply patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
@@ -219,7 +236,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
         if (slot.HasDrift)
         {
             var answer = MessageBox.Show(
-                $"{slot.State.DriftCount} file(s) in the {where} have changed since '{slot.Patch}' was applied.\n\n" +
+                $"{slot.State.DriftCount} file(s) in the {where} have changed since '{slot.DisplayName}' was applied.\n\n" +
                 "That is usually a game update written over the patch, which makes those files newer " +
                 "than the copies kept when it was applied.\n\n" +
                 "Yes - put the old files back anyway.\n" +
@@ -230,7 +247,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
             force = answer == MessageBoxResult.Yes;
         }
         else if (MessageBox.Show(
-                     $"Take '{slot.Patch}' back off the {where}?\n\n" +
+                     $"Take '{slot.DisplayName}' back off the {where}?\n\n" +
                      "The files it replaced are restored and the ones it added are removed. " +
                      "The backups are kept either way.",
                      "Revert patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
@@ -300,6 +317,26 @@ public sealed class BuildVariantsViewModel : ObservableObject
             DirectoryCopier.Copy(source, link, overwrite: false);
 
             _shell.Report($"Repentogon\\ is a real folder now, copied from {Path.GetFileName(source)}.");
+        });
+    }
+
+    /// <summary>Let a release's packaging name be replaced with something readable.</summary>
+    private void RenamePatch(PatchItemViewModel? item)
+    {
+        var service = PatchEngine;
+        if (service is null || item is null) return;
+
+        var entered = Views.TextPrompt.Ask(
+            "Name this patch",
+            "Shown wherever this patch appears. The folder on disk keeps its own name.",
+            item.Name);
+
+        if (entered is null || entered.Trim().Length == 0) return;
+
+        RunPatchOperation(() =>
+        {
+            service.SetDisplayName(item.FolderName, entered);
+            _shell.Report($"Renamed to '{entered.Trim()}'.");
         });
     }
 

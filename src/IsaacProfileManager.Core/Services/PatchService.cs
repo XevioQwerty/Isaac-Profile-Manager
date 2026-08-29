@@ -569,6 +569,20 @@ public sealed class PatchService
         return Describe(name);
     }
 
+    /// <summary>
+    /// Give a patch a name of your own.
+    ///
+    /// Only the manifest changes: the folder keeps the name it arrived with, and
+    /// so do the journals that refer to it. Renaming the folder would strand
+    /// every record of what an applied patch displaced.
+    /// </summary>
+    public void SetDisplayName(string patch, string displayName)
+    {
+        var manifest = LoadManifest(patch);
+        manifest.Name = string.IsNullOrWhiteSpace(displayName) ? patch : displayName.Trim();
+        SaveManifest(patch, manifest);
+    }
+
     /// <summary>Forget a patch. Refuses while it is applied, so its journal cannot be orphaned.</summary>
     public void Remove(string patch)
     {
