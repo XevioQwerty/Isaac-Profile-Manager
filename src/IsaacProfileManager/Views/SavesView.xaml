@@ -81,33 +81,64 @@
                 <Border Style="{StaticResource Card}">
                     <StackPanel>
                         <TextBlock Text="Before you can switch saves" Style="{StaticResource Heading}"/>
-                        <TextBlock Text="{Binding CloudStateText}" Margin="0,0,0,8"/>
-                        <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
-                                   Text="With Steam Cloud on, Steam owns these files and may restore the set you just replaced — silently, and possibly merging one save's unlocks into another. Save switching is only supported with Cloud off for Isaac."/>
+                        <!-- Steam Cloud only matters when the saves are Steam's -->
+                        <StackPanel Visibility="{Binding CloudApplies, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock Text="{Binding CloudStateText}" Margin="0,0,0,8"/>
+                            <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,10"
+                                       Text="With Steam Cloud on, Steam owns these files and may restore the set you just replaced — silently, and possibly merging one save's unlocks into another. Save switching is only supported with Cloud off for Isaac."/>
+                        </StackPanel>
+
+                        <TextBlock Text="{Binding CloudIrrelevantText}" TextWrapping="Wrap" Margin="0,0,0,10"
+                                   Visibility="{Binding CloudApplies, Converter={StaticResource BoolToCollapsed}}"/>
 
                         <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
                                 CornerRadius="4" Padding="10" Margin="0,0,0,10"
-                                Visibility="{Binding ShowStaleness, Converter={StaticResource BoolToVisible}}">
+                                Visibility="{Binding ShowCloudStaleness, Converter={StaticResource BoolToVisible}}">
                             <TextBlock Text="{Binding StalenessText}"/>
                         </Border>
 
                         <WrapPanel Margin="0,0,0,6">
                             <Button Content="Turn Cloud off for me" Style="{StaticResource PrimaryButton}"
-                                    Command="{Binding TurnCloudOffCommand}" Margin="0,0,8,8"/>
-                            <Button Content="Open Steam properties for Isaac" Command="{Binding OpenSteamPropertiesCommand}" Margin="0,0,8,8"/>
+                                    Command="{Binding TurnCloudOffCommand}" Margin="0,0,8,8"
+                                    Visibility="{Binding CloudApplies, Converter={StaticResource BoolToVisible}}"/>
+                            <Button Content="Open Steam properties for Isaac" Command="{Binding OpenSteamPropertiesCommand}" Margin="0,0,8,8"
+                                    Visibility="{Binding CloudApplies, Converter={StaticResource BoolToVisible}}"/>
                             <Button Content="Re-check" Command="{Binding RecheckCommand}" Margin="0,0,8,8"/>
                             <Button Content="Open save folder" Command="{Binding OpenLiveFolderCommand}" Margin="0,0,8,8"/>
                             <Button Content="Open save sets folder" Command="{Binding OpenSetsFolderCommand}" Margin="0,0,8,8"/>
                         </WrapPanel>
-                        <TextBlock Text="{Binding TurnCloudOffHint}" Style="{StaticResource Dim}" Margin="0,0,0,10"/>
+                        <TextBlock Text="{Binding TurnCloudOffHint}" Style="{StaticResource Dim}" Margin="0,0,0,10"
+                                   Visibility="{Binding CloudApplies, Converter={StaticResource BoolToVisible}}"/>
 
                         <CheckBox IsChecked="{Binding CloudAcknowledged}" Margin="0,0,0,4"
-                                  Content="I have checked in Steam myself — Cloud is off for Isaac"/>
+                                  Content="I have checked in Steam myself — Cloud is off for Isaac"
+                                  Visibility="{Binding CloudApplies, Converter={StaticResource BoolToVisible}}"/>
                         <TextBlock Style="{StaticResource Dim}" Margin="22,0,0,10"
+                                   Visibility="{Binding CloudApplies, Converter={StaticResource BoolToVisible}}"
                                    Text="Use this if Steam's dialog says off but the file above still says on. It overrides the Cloud check only — the game-running and build checks still apply."/>
+
+                        <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                                CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                                Visibility="{Binding SaveFolderLooksWrong, Converter={StaticResource BoolToVisible}}">
+                            <StackPanel>
+                                <TextBlock Text="No save files in this folder" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                                <TextBlock Text="{Binding SaveFolderWarning}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="Choose the save folder..." Margin="0,0,8,0"
+                                            Command="{Binding ChooseSaveFolderCommand}"/>
+                                    <Button Content="Re-check" Command="{Binding RecheckCommand}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
 
                         <TextBlock Text="Live save folder" Style="{StaticResource Dim}"/>
                         <TextBlock Text="{Binding LiveFolderText}" Style="{StaticResource Mono}"/>
+                        <TextBlock Text="{Binding SaveFolderSourceText}" Style="{StaticResource Dim}"
+                                   Margin="0,2,0,0" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <Button Content="Change..." Command="{Binding ChooseSaveFolderCommand}" Margin="0,0,8,0"/>
+                            <Button Content="Work it out again" Command="{Binding ClearSaveFolderCommand}"/>
+                        </StackPanel>
                         <TextBlock Text="{Binding LastSyncText}" Style="{StaticResource Dim}" Margin="0,4,0,0"
                                    Visibility="{Binding LastSyncText, Converter={StaticResource StringToVisible}}"/>
 

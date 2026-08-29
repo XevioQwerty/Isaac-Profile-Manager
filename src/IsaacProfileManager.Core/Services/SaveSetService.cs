@@ -13,7 +13,8 @@ public sealed record SaveSwapPreconditions(
     SteamCloudState CloudState,
     bool RemoteDirFound,
     bool BuildMatches,
-    string? BuildProblem)
+    string? BuildProblem,
+    bool CloudApplies = true)
 {
     public bool CanActivate => IsaacClosed && CloudDisabled && RemoteDirFound && BuildMatches;
 
@@ -23,8 +24,8 @@ public sealed record SaveSwapPreconditions(
         {
             var blockers = new List<string>();
             if (!IsaacClosed) blockers.Add("Isaac is running. It writes save state on exit, so a swap now would be lost.");
-            if (!RemoteDirFound) blockers.Add("Steam's save folder could not be found.");
-            if (!CloudDisabled)
+            if (!RemoteDirFound) blockers.Add("The game's save folder could not be found.");
+            if (CloudApplies && !CloudDisabled)
                 blockers.Add(CloudState == SteamCloudState.Unknown
                     ? "Steam Cloud state could not be read. Turn Cloud off for Isaac to be sure."
                     : "Steam Cloud is on for Isaac. It would restore the saves you replace — turn it off in the game's properties.");
@@ -68,13 +69,22 @@ public sealed class SaveSetService
     private readonly IGameProcessService _process;
     private readonly SteamCloudService _cloud;
     private readonly string _syncRoot;
+    private readonly string? _configuredSaveFolder;
+    private readonly string? _gameDir;
 
-    public SaveSetService(IGameProcessService process, SteamCloudService cloud, string syncRoot)
+    public SaveSetService(IGameProcessService process, SteamCloudService cloud, string syncRoot,
+                          string? configuredSaveFolder = null, string? gameDir = null)
     {
         _process = process;
         _cloud = cloud;
         _syncRoot = syncRoot;
+        _configuredSaveFolder = configuredSaveFolder;
+        _gameDir = gameDir;
     }
+
+    /// <summary>Which folder was chosen for the live saves, and on what grounds.</summary>
+    public SaveFolderResolution ResolveLiveFolder() =>
+        new SaveLocationService(_cloud).Resolve(_configuredSaveFolder, _gameDir);
 
     public string SetsRoot => Path.Combine(_syncRoot, SetsFolderName);
     public string BackupRoot => Path.Combine(_syncRoot, ".backup", "saves");
@@ -120,7 +130,15 @@ public sealed class SaveSetService
 
     // --- The live folder ----------------------------------------------------
 
-    public string? LiveFolder => _cloud.GetStatus().RemoteDir;
+    /// <summary>
+    /// The folder the game reads and writes saves in.
+    ///
+    /// This used to be Steam's cloud folder unconditionally, which is only
+    /// correct for a copy running against the real Steam client. Everything
+    /// else — anything with an emulated steam_api — writes elsewhere, so the
+    /// app was watching a directory the game never touched.
+    /// </summary>
+    public string? LiveFolder => ResolveLiveFolder().Path;
 
     public IReadOnlyList<SaveFileState> ReadLive()
     {
@@ -429,6 +447,13 @@ public sealed class SaveSetService
     public SaveSwapPreconditions Check(SaveSet set, GameBuild selectedBuild, bool cloudAcknowledged = false)
     {
         var cloud = _cloud.GetStatus();
+        var resolved = ResolveLiveFolder();
+
+        // Steam Cloud can only take a file back if the file is Steam's. When the
+        // live saves are somewhere Steam does not know about — anything running
+        // an emulated steam_api — the whole question is beside the point, and
+        // gating on it would block a swap for a reason that cannot apply.
+        var cloudApplies = resolved.Source == SaveFolderSource.SteamUserdata;
 
         var buildMatches = true;
         string? buildProblem = null;
@@ -450,11 +475,12 @@ public sealed class SaveSetService
 
         return new SaveSwapPreconditions(
             IsaacClosed: !_process.IsIsaacRunning(),
-            CloudDisabled: cloud.SafeToSwapSaves || cloudAcknowledged,
+            CloudDisabled: !cloudApplies || cloud.SafeToSwapSaves || cloudAcknowledged,
             CloudState: cloud.State,
-            RemoteDirFound: cloud.RemoteDir is not null && Directory.Exists(cloud.RemoteDir),
+            RemoteDirFound: resolved.Found && Directory.Exists(resolved.Path!),
             BuildMatches: buildMatches,
-            BuildProblem: buildProblem);
+            BuildProblem: buildProblem,
+            CloudApplies: cloudApplies);
     }
 
     /// <summary>Live files that differ from what the set recorded — i.e. unsaved progress.</summary>
@@ -560,8 +586,14 @@ public sealed class SaveSetService
         foreach (var existing in ReadLive())
             File.Delete(Path.Combine(folder, existing.FileName));
 
+        // Only save files. A backup can be a deleted set's folder, which carries
+        // set.json, and copying that in left our own bookkeeping sitting in the
+        // game's save directory — observed on the reference install.
         foreach (var file in new DirectoryInfo(source).GetFiles())
+        {
+            if (!IsSaveFile(file.Name)) continue;
             File.Copy(file.FullName, Path.Combine(folder, file.Name), overwrite: true);
+        }
 
         return safety;
     }

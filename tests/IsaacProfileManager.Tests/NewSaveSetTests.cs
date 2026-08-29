@@ -172,6 +172,25 @@ public class NewSaveSetTests
                                               "rep+persistentgamedata2.dat")));
     }
 
+    [Fact]
+    public void RestoringABackupNeverPutsOurMetadataInTheSaveFolder()
+    {
+        using var temp = new TempDir();
+        var (service, _, remote) = Build(temp);
+        GiveVanillaSave(remote);
+
+        // Removing a set moves its folder into the backups, and a set folder
+        // carries set.json. Restoring that used to copy it into the game's save
+        // folder, where it was found sitting on the reference install.
+        service.Capture("old-set", "my-mods");
+        var moved = Path.GetFileName(service.DeleteSet("old-set"));
+
+        service.RestoreBackup(moved);
+
+        Assert.False(File.Exists(Path.Combine(remote, SaveSetService.MetadataFileName)));
+        Assert.True(File.Exists(Path.Combine(remote, "rep+persistentgamedata1.dat")));
+    }
+
     // --- Deleting a backup --------------------------------------------------
 
     [Fact]

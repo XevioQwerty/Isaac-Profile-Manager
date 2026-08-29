@@ -86,6 +86,17 @@ public sealed class AppConfig
     [JsonPropertyName("BuildLinkFolder")]
     public string? BuildLinkFolder { get; set; }
 
+    /// <summary>
+    /// The folder the game actually keeps its live saves in, when it is not
+    /// where we would work it out to be.
+    ///
+    /// Steam's userdata folder is right for a copy running against the real
+    /// Steam client and wrong for one running a DRM emulator, where the
+    /// emulated API writes somewhere else entirely. Null means work it out.
+    /// </summary>
+    [JsonPropertyName("SaveFolder")]
+    public string? SaveFolder { get; set; }
+
     /// <summary>Human-readable note of the variant last activated. Advisory only — the junction is the truth.</summary>
     [JsonPropertyName("ActiveBuildVariant")]
     public string? ActiveBuildVariant { get; set; }

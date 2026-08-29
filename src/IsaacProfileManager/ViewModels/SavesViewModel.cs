@@ -82,6 +82,84 @@ public sealed class SavesViewModel : ObservableObject
         CaptureIntoCommand = new RelayCommand(CaptureInto, () => Selected is not null);
         DeleteBackupCommand = new RelayCommand(DeleteBackup, () => SelectedBackup is not null);
         OpenBackupsFolderCommand = new RelayCommand(OpenBackupsFolder, () => Service is not null);
+        ChooseSaveFolderCommand = new RelayCommand(ChooseSaveFolder, () => _shell.Config is not null);
+        ClearSaveFolderCommand = new RelayCommand(ClearSaveFolder, () => _shell.Config?.SaveFolder is not null);
+    }
+
+    /// <summary>Point the app at the folder the game really uses.</summary>
+    public RelayCommand ChooseSaveFolderCommand { get; }
+
+    /// <summary>Go back to working it out.</summary>
+    public RelayCommand ClearSaveFolderCommand { get; }
+
+    /// <summary>
+    /// Whether Steam Cloud has any bearing on these saves at all. It does not
+    /// when the game writes somewhere Steam does not own, which is every copy
+    /// running an emulated steam_api.
+    /// </summary>
+    public bool CloudApplies => SaveFolder?.Source is null or SaveFolderSource.SteamUserdata;
+
+    /// <summary>
+    /// The "Steam was running when this was read" caveat, which is only worth
+    /// showing when the Cloud setting matters at all.
+    /// </summary>
+    public bool ShowCloudStaleness => CloudApplies && ShowStaleness;
+
+    public string CloudIrrelevantText =>
+        CloudApplies
+            ? string.Empty
+            : "Steam Cloud does not apply here. These saves are not in Steam's folder, so Steam has " +
+              "no copy of them and cannot put one back - nothing below needs turning off.";
+
+    /// <summary>Which folder was chosen for the live saves, and why.</summary>
+    public SaveFolderResolution? SaveFolder => Service?.ResolveLiveFolder();
+
+    public string SaveFolderSourceText => SaveFolder is null
+        ? string.Empty
+        : $"Chosen because it is {SaveFolder.SourceText}.";
+
+    /// <summary>
+    /// True when the chosen folder holds no save files at all. That is the state
+    /// where every save feature quietly does nothing, so it is worth saying so
+    /// rather than showing an empty list and letting it be discovered later.
+    /// </summary>
+    public bool SaveFolderLooksWrong => SaveFolder is { Found: true, SaveFileCount: 0 };
+
+    public string SaveFolderWarning =>
+        !SaveFolderLooksWrong
+            ? string.Empty
+            : "There are no save files in this folder, so nothing here can act on your saves. " +
+              "Steam's own folder is only used by a copy running against the real Steam client - " +
+              "with a DRM emulator the game writes somewhere else. Launch the game, play far enough " +
+              "for it to save, then press Re-check; if it still looks empty, point the app at the " +
+              "folder that gained a persistentgamedata file.";
+
+    private void ChooseSaveFolder()
+    {
+        var config = _shell.Config;
+        if (config is null) return;
+
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Where the game keeps its live saves",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        config.SaveFolder = dialog.FolderName;
+        _shell.Store.Save(config);
+        _shell.Report($"Live saves will be read from {dialog.FolderName}.");
+        _shell.Reload();
+    }
+
+    private void ClearSaveFolder()
+    {
+        var config = _shell.Config;
+        if (config is null) return;
+
+        config.SaveFolder = null;
+        _shell.Store.Save(config);
+        _shell.Report("Back to working out the save folder automatically.");
+        _shell.Reload();
     }
 
     /// <summary>Delete the selected backup. The one destructive action in this tab.</summary>
@@ -235,10 +313,18 @@ public sealed class SavesViewModel : ObservableObject
     private SaveSetService? Service =>
         string.IsNullOrWhiteSpace(_shell.Config?.SyncRoot)
             ? null
-            : new SaveSetService(_shell.Process, new SteamCloudService(), _shell.Config!.SyncRoot!);
+            : new SaveSetService(_shell.Process, new SteamCloudService(), _shell.Config!.SyncRoot!,
+                                 _shell.Config!.SaveFolder, _shell.Config!.GameDir);
 
     public SteamCloudStatus? Cloud { get; private set; }
-    public string? LiveFolder => Cloud?.RemoteDir;
+    /// <summary>
+    /// The folder the game actually uses, not Steam's.
+    ///
+    /// This read Cloud.RemoteDir directly, which meant the path on screen and
+    /// the reason printed under it could disagree - the panel said "reported by
+    /// the game" above Steam's path. One source of truth, and it is the resolver.
+    /// </summary>
+    public string? LiveFolder => SaveFolder?.Path;
 
     public SaveSetViewModel? Selected
     {
@@ -338,7 +424,7 @@ public sealed class SavesViewModel : ObservableObject
 
     public bool ShowStaleness => StalenessText.Length > 0;
 
-    public string LiveFolderText => LiveFolder ?? "(Steam's save folder was not found)";
+    public string LiveFolderText => LiveFolder ?? "(the game's save folder could not be found)";
 
     public string LastSyncText => Cloud?.LastSyncState is { Length: > 0 } s ? $"Steam's last sync state: {s}" : "";
 
@@ -383,6 +469,9 @@ public sealed class SavesViewModel : ObservableObject
                  {
                      nameof(Cloud), nameof(CloudSafe), nameof(CloudStateText), nameof(IsaacClosed),
                      nameof(CanActivate), nameof(Blockers), nameof(BlockersText), nameof(HasBlockers),
+                     nameof(SaveFolder), nameof(SaveFolderSourceText), nameof(SaveFolderLooksWrong),
+                     nameof(CloudApplies), nameof(CloudIrrelevantText), nameof(ShowCloudStaleness),
+                     nameof(SaveFolderWarning),
                      nameof(LiveFolder), nameof(LiveFolderText), nameof(LastSyncText), nameof(SelectedBuild),
                      nameof(StalenessText), nameof(ShowStaleness), nameof(SteamRunning), nameof(TurnCloudOffHint),
                  })
