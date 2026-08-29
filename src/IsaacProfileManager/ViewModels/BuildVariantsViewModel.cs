@@ -2,9 +2,41 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
+using IsaacProfileManager.Core.Models;
 using IsaacProfileManager.Core.Services;
 
 namespace IsaacProfileManager.ViewModels;
+
+/// <summary>One patch as it appears in a target's list.</summary>
+public sealed class PatchItemViewModel : ObservableObject
+{
+    public required PatchInfo Info { get; init; }
+    public required IReadOnlyList<PatchDrift> Drift { get; init; }
+
+    public string Name => Info.Name;
+    public string Description => Info.Description;
+    public string SummaryText => Info.SummaryText;
+    public bool IsApplied => Info.IsApplied;
+
+    public string StateText => Info.IsApplied ? "APPLIED" : string.Empty;
+
+    public string AppliedText => Info.AppliedUtc is not null && DateTime.TryParse(Info.AppliedUtc, out var when)
+        ? $"applied {when.ToLocalTime():yyyy-MM-dd HH:mm}"
+        : string.Empty;
+
+    public bool HasDrift => Drift.Count > 0;
+
+    /// <summary>
+    /// Something has written over the patch since it went on — a game update is
+    /// the ordinary cause, and it means a plain revert would put an old file
+    /// back over a newer one.
+    /// </summary>
+    public string DriftText => Drift.Count == 0
+        ? string.Empty
+        : $"{Drift.Count} file(s) changed since this was applied: " +
+          string.Join(", ", Drift.Take(4).Select(d => d.Path)) +
+          (Drift.Count > 4 ? ", ..." : "");
+}
 
 /// <summary>
 /// Drives the build-folder switcher: the game's <c>Repentogon\</c> is a junction
@@ -34,6 +66,268 @@ public sealed class BuildVariantsViewModel : ObservableObject
         BrowseBuildRootCommand = new RelayCommand(() => Browse("Where the build folders live", d => BuildRootDraft = d));
         SavePathsCommand = new RelayCommand(SavePaths, () => _shell.Config is not null);
         ResetPathsCommand = new RelayCommand(LoadPathDrafts, () => _shell.Config is not null);
+
+        AddPatchCommand = new RelayCommand(AddPatch, () => Patches is not null);
+        ApplyPatchCommand = new RelayCommand(p => TogglePatch(p as PatchItemViewModel, apply: true),
+                                             p => p is PatchItemViewModel { IsApplied: false });
+        RevertPatchCommand = new RelayCommand(p => TogglePatch(p as PatchItemViewModel, apply: false),
+                                              p => p is PatchItemViewModel { IsApplied: true });
+        RemovePatchCommand = new RelayCommand(p => RemovePatch(p as PatchItemViewModel),
+                                              p => p is PatchItemViewModel { IsApplied: false });
+        CollapseJunctionCommand = new RelayCommand(CollapseJunction, () => BuildLinkIsJunction);
+        OpenPatchesFolderCommand = new RelayCommand(OpenPatchesFolder, () => Patches is not null);
+    }
+
+    /// <summary>Patches laid over the retail install.</summary>
+    public ObservableCollection<PatchItemViewModel> RootPatches { get; } = new();
+
+    /// <summary>Patches laid over the folder the REPENTOGON launcher loads.</summary>
+    public ObservableCollection<PatchItemViewModel> RepentogonPatches { get; } = new();
+
+    public RelayCommand AddPatchCommand { get; }
+    public RelayCommand ApplyPatchCommand { get; }
+    public RelayCommand RevertPatchCommand { get; }
+    public RelayCommand RemovePatchCommand { get; }
+    public RelayCommand CollapseJunctionCommand { get; }
+    public RelayCommand OpenPatchesFolderCommand { get; }
+
+    public bool HasRootPatches => RootPatches.Count > 0;
+    public bool HasRepentogonPatches => RepentogonPatches.Count > 0;
+    public bool HasNoPatches => RootPatches.Count == 0 && RepentogonPatches.Count == 0;
+
+    private PatchService? Patches =>
+        string.IsNullOrWhiteSpace(_shell.Config?.SyncRoot)
+            ? null
+            : new PatchService(_shell.Process, _shell.Config!.SyncRoot!);
+
+    private string TargetDirFor(PatchTarget target) =>
+        _shell.Config is null
+            ? string.Empty
+            : target == PatchTarget.GameRoot
+                ? _shell.Config.GameDir ?? string.Empty
+                : BuildVariantService.ResolveLinkPath(_shell.Config);
+
+    /// <summary>
+    /// The old mechanism still in place: Repentogon\ pointing at a complete
+    /// build. Patches lay files over a real folder, so the link has to become
+    /// one before they mean anything.
+    /// </summary>
+    public bool BuildLinkIsJunction => Status?.State is BuildLinkState.Linked or BuildLinkState.LinkedElsewhere;
+
+    public string JunctionMigrationText =>
+        Status is null || !BuildLinkIsJunction
+            ? string.Empty
+            : $"Repentogon\\ is a link to {Status.LinkTarget}. Patches write into a real folder, so this " +
+              "has to be turned back into one before you can lay anything over it. The build is copied " +
+              "in place and the folder it came from is left exactly where it is.";
+
+    private void RefreshPatches()
+    {
+        RootPatches.Clear();
+        RepentogonPatches.Clear();
+
+        var service = Patches;
+        if (service is not null)
+        {
+            foreach (var info in service.DescribeAll())
+            {
+                var item = new PatchItemViewModel
+                {
+                    Info = info,
+                    Drift = info.IsApplied ? service.DetectDrift(info.Name) : Array.Empty<PatchDrift>(),
+                };
+                (info.Target == PatchTarget.GameRoot ? RootPatches : RepentogonPatches).Add(item);
+            }
+        }
+
+        OnPropertyChanged(nameof(HasRootPatches));
+        OnPropertyChanged(nameof(HasRepentogonPatches));
+        OnPropertyChanged(nameof(HasNoPatches));
+        OnPropertyChanged(nameof(BuildLinkIsJunction));
+        OnPropertyChanged(nameof(JunctionMigrationText));
+    }
+
+    /// <summary>Register an unzipped folder as a patch, and ask what it is laid over.</summary>
+    private void AddPatch()
+    {
+        var service = Patches;
+        if (service is null) return;
+
+        var dialog = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Pick the unzipped folder to lay over the game",
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var name = Path.GetFileName(dialog.FolderName.TrimEnd(Path.DirectorySeparatorChar));
+
+        var answer = MessageBox.Show(
+            $"Where does '{name}' go?\n\n" +
+            "Yes - over the retail install (the folder with isaac-ng.exe and mods\\).\n" +
+            "No - over the REPENTOGON folder the launcher loads.\n\n" +
+            "Nothing is applied yet; this only files it away so you can apply it when you want it.",
+            "Add a patch", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+
+        if (answer == MessageBoxResult.Cancel) return;
+        var target = answer == MessageBoxResult.Yes ? PatchTarget.GameRoot : PatchTarget.Repentogon;
+
+        RunPatchOperation(() =>
+        {
+            var info = service.Install(dialog.FolderName, name, target);
+            _shell.Report($"Added '{info.Name}' - {info.SummaryText}, for the {info.TargetText}.");
+        });
+    }
+
+    private void TogglePatch(PatchItemViewModel? item, bool apply)
+    {
+        var service = Patches;
+        if (service is null || item is null || _shell.Config is null) return;
+
+        var targetDir = TargetDirFor(item.Info.Target);
+        if (!Directory.Exists(targetDir))
+        {
+            MessageBox.Show($"The {item.Info.TargetText} does not exist:\n{targetDir}\n\nCheck the paths below.",
+                            "Patches", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (apply)
+        {
+            if (MessageBox.Show(
+                    $"Lay '{item.Name}' over the {item.Info.TargetText}?\n\n" +
+                    $"{targetDir}\n\n" +
+                    $"{item.SummaryText}. Every file it replaces is copied aside first, and reverting " +
+                    "puts them all back. Nothing is deleted.",
+                    "Apply patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+
+            RunPatchOperation(() =>
+            {
+                var result = service.Apply(item.Name, targetDir);
+                _shell.Report("Applied " + result.Summary);
+                if (result.Skipped.Count > 0)
+                    MessageBox.Show(
+                        "Applied, but these were left alone:\n\n" +
+                        string.Join("\n", result.Skipped.Select(sk => $"  {sk.Path} - {sk.Reason}")),
+                        "Apply patch", MessageBoxButton.OK, MessageBoxImage.Information);
+            });
+            return;
+        }
+
+        // Reverting: drift is the case worth stopping on.
+        var force = false;
+        if (item.HasDrift)
+        {
+            var answer = MessageBox.Show(
+                $"{item.DriftText}\n\n" +
+                "That is usually a game update written over the patch, which makes those files newer " +
+                "than the copies kept when it was applied.\n\n" +
+                "Yes - put the old files back anyway.\n" +
+                "No - leave the changed ones and undo the rest.",
+                "Files have changed since", MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+
+            if (answer == MessageBoxResult.Cancel) return;
+            force = answer == MessageBoxResult.Yes;
+        }
+        else if (MessageBox.Show(
+                     $"Take '{item.Name}' back off the {item.Info.TargetText}?\n\n" +
+                     "The files it replaced are restored and the ones it added are removed. " +
+                     "The backups are kept either way.",
+                     "Revert patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        RunPatchOperation(() =>
+        {
+            var result = service.Revert(item.Name, force);
+            _shell.Report("Reverted " + result.Summary);
+            if (result.Skipped.Count > 0)
+                MessageBox.Show(
+                    "These were left as they are, so the patch still counts as applied:\n\n" +
+                    string.Join("\n", result.Skipped.Select(sk => $"  {sk.Path} - {sk.Reason}")),
+                    "Revert patch", MessageBoxButton.OK, MessageBoxImage.Information);
+        });
+    }
+
+    private void RemovePatch(PatchItemViewModel? item)
+    {
+        var service = Patches;
+        if (service is null || item is null) return;
+
+        if (MessageBox.Show(
+                $"Forget '{item.Name}'?\n\nIts folder is deleted from your patches. The game is not touched.",
+                "Remove patch", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        RunPatchOperation(() =>
+        {
+            service.Remove(item.Name);
+            _shell.Report($"Removed the patch '{item.Name}'.");
+        });
+    }
+
+    /// <summary>
+    /// Turn a Repentogon\ junction back into a real folder by copying what it
+    /// points at. The source is left alone: this is the one step that cannot be
+    /// undone by the patch journal, so the old build stays until the user is
+    /// satisfied and deletes it themselves.
+    /// </summary>
+    private void CollapseJunction()
+    {
+        if (_shell.Config is null || Status is null || !BuildLinkIsJunction) return;
+
+        var link = Status.LinkPath;
+        var source = Status.LinkTarget;
+        if (source is null || !Directory.Exists(source)) return;
+
+        if (MessageBox.Show(
+                $"Copy the build at\n{source}\n\ninto\n{link}\n\n" +
+                "as a real folder, and remove the link?\n\n" +
+                "The folder it points at is left exactly where it is - delete it yourself once you are " +
+                "happy. This is about 1 GB and takes a minute.",
+                "Turn the link into a folder", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        RunPatchOperation(() =>
+        {
+            if (_shell.Process.IsIsaacRunning())
+                throw new UnsafePathException("Isaac is running. Close it first.");
+
+            // Remove the link before copying, or the copy would follow it back
+            // into the source and duplicate the build inside itself.
+            _shell.Junctions.RemoveLink(link);
+            DirectoryCopier.Copy(source, link, overwrite: false);
+
+            _shell.Report($"Repentogon\\ is a real folder now, copied from {Path.GetFileName(source)}.");
+        });
+    }
+
+    private void OpenPatchesFolder()
+    {
+        var service = Patches;
+        if (service is null) return;
+        Directory.CreateDirectory(service.PatchesRoot);
+        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{service.PatchesRoot}\"") { UseShellExecute = true });
+    }
+
+    private void RunPatchOperation(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Patches", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            var message = _shell.StatusMessage;
+            _shell.Reload();
+            _shell.Report(message);
+        }
     }
 
     public RelayCommand BrowseGameDirCommand { get; }
@@ -229,6 +523,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
         SelectedVariant = Variants.Contains(previous ?? string.Empty) ? previous : Status.ActiveVariant;
 
         LoadPathDrafts();
+        RefreshPatches();
     }
 
     private void Switch()
