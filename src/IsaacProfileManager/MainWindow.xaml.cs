@@ -29,7 +29,10 @@ public partial class MainWindow : Window
         _statusTimer.Tick += (_, _) => _viewModel.RefreshStatusBar();
         _statusTimer.Start();
 
+        WindowGeometry.Restore(this);
+
         Activated += (_, _) => _viewModel.RefreshStatusBar();
+        Closing += (_, _) => WindowGeometry.Save(this);
         Closed += (_, _) => _statusTimer.Stop();
     }
 

@@ -61,7 +61,7 @@
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,10">
-        <StackPanel MaxWidth="820" HorizontalAlignment="Left">
+        <StackPanel MaxWidth="1100" HorizontalAlignment="Stretch">
 
             <Border Style="{StaticResource Card}">
                 <StackPanel>

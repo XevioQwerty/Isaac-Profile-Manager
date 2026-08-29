@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="820" HorizontalAlignment="Left" Margin="16">
+        <StackPanel MaxWidth="1000" HorizontalAlignment="Stretch" Margin="16">
 
             <TextBlock Text="Set up Isaac Profile Manager" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,4"/>
             <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,14"
