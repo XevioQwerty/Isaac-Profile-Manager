@@ -128,11 +128,11 @@ public sealed class SavesViewModel : ObservableObject
     public string SaveFolderWarning =>
         !SaveFolderLooksWrong
             ? string.Empty
-            : "There are no save files in this folder, so nothing here can act on your saves. " +
-              "Steam's own folder is only used by a copy running against the real Steam client - " +
-              "with a DRM emulator the game writes somewhere else. Launch the game, play far enough " +
-              "for it to save, then press Re-check; if it still looks empty, point the app at the " +
-              "folder that gained a persistentgamedata file.";
+            : "There are no save files here yet, so nothing on this tab can act on your saves. " +
+              "That is expected right after starting a fresh save - the game writes one the next " +
+              "time it saves. Launch it, play far enough to save, then press Re-check. If a " +
+              "different folder is the one that gains a persistentgamedata file, point the app at " +
+              "that one instead.";
 
     private void ChooseSaveFolder()
     {

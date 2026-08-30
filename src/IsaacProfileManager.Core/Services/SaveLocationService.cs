@@ -59,11 +59,17 @@ public sealed class SaveLocationService
     /// <summary>
     /// Resolve the live save folder.
     ///
-    /// A configured path wins outright. Otherwise whichever of the two
-    /// candidates actually holds save files is preferred, because that is the
-    /// only evidence that distinguishes them — and on a fresh profile neither
-    /// does, in which case the game's own report is the better guess than a
-    /// Steam folder that may belong to a copy running without Steam.
+    /// A configured path wins outright. After that the question is which of two
+    /// plausible folders the game is actually using, and the honest answer is
+    /// whichever one it wrote to most recently — not merely whichever has files
+    /// in it. A stale folder full of month-old saves beats an empty one on
+    /// presence and loses on recency, and presence was the wrong test: it picked
+    /// the decoy at exactly the moment the real folder had just been emptied.
+    ///
+    /// Steam's folder also gets the benefit of the doubt when it is empty but
+    /// <c>remotecache.vdf</c> shows Steam has been syncing saves for the app.
+    /// An empty folder Steam manages is a folder the game will write to again;
+    /// it is not evidence that the saves live elsewhere.
     /// </summary>
     public SaveFolderResolution Resolve(string? configuredPath, string? gameDir)
     {
@@ -79,16 +85,76 @@ public sealed class SaveLocationService
 
         if (candidates.Count == 0) return new SaveFolderResolution(null, SaveFolderSource.None, 0);
 
-        // Whichever one actually holds saves is the live folder, whatever we
-        // would otherwise have guessed.
-        foreach (var (path, source) in candidates)
-        {
-            var count = CountSaves(path);
-            if (count > 0) return new SaveFolderResolution(path, source, count);
-        }
+        // Steam's own manifest is the strongest evidence there is, and it is
+        // checked first rather than as a fallback. It says the game has been
+        // saving through Steam, which settles the question whatever else is
+        // lying around — an empty folder Steam manages beats a folder full of
+        // saves from a week ago, and that pairing is exactly the state that
+        // made this point at the wrong one.
+        if (steam is not null && SteamHasSyncedSaves(steam))
+            return new SaveFolderResolution(steam, SaveFolderSource.SteamUserdata, CountSaves(steam));
+
+        // Otherwise the folder written to most recently. Presence alone cannot
+        // tell a live folder from a stale one.
+        var best = candidates
+            .Select(c => (c.Path, c.Source, Count: CountSaves(c.Path), Newest: NewestSaveWrite(c.Path)))
+            .Where(c => c.Count > 0)
+            .OrderByDescending(c => c.Newest)
+            .FirstOrDefault();
+
+        if (best.Path is not null)
+            return new SaveFolderResolution(best.Path, best.Source, best.Count);
 
         var (fallback, fallbackSource) = candidates[0];
         return new SaveFolderResolution(fallback, fallbackSource, 0);
+    }
+
+    /// <summary>When a save in this folder was last written, or <see cref="DateTime.MinValue"/>.</summary>
+    private static DateTime NewestSaveWrite(string folder)
+    {
+        if (!Directory.Exists(folder)) return DateTime.MinValue;
+
+        try
+        {
+            var times = Directory.GetFiles(folder)
+                .Where(f => SaveSetService.IsSaveFile(Path.GetFileName(f)))
+                .Select(File.GetLastWriteTimeUtc)
+                .ToList();
+
+            return times.Count == 0 ? DateTime.MinValue : times.Max();
+        }
+        catch (IOException)
+        {
+            return DateTime.MinValue;
+        }
+    }
+
+    /// <summary>
+    /// Whether Steam's manifest for the app mentions save files. Steam writes
+    /// <c>remotecache.vdf</c> beside the remote folder listing what it holds, so
+    /// an entry there means the game has been saving through Steam even if the
+    /// folder happens to be empty at this instant.
+    /// </summary>
+    private static bool SteamHasSyncedSaves(string remoteDir)
+    {
+        var manifest = Path.Combine(Path.GetDirectoryName(remoteDir.TrimEnd(Path.DirectorySeparatorChar)) ?? "",
+                                    "remotecache.vdf");
+        if (!File.Exists(manifest)) return false;
+
+        try
+        {
+            foreach (var line in File.ReadLines(manifest))
+            {
+                var name = line.Trim().Trim('"');
+                if (SaveSetService.IsSaveFile(name)) return true;
+            }
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+
+        return false;
     }
 
     /// <summary>

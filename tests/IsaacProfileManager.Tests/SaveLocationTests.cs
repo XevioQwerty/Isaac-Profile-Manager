@@ -60,12 +60,10 @@ public class SaveLocationTests
         using var temp = new TempDir();
         var (service, _, remote, gameDir) = Build(temp);
 
-        // The emulated copy's real location, which Steam knows nothing about.
         var documents = temp.Dir("Documents", "My Games", "Binding of Isaac Repentance+");
         GiveReportedPath(gameDir, documents);
         GiveSave(documents);
 
-        // Steam's folder exists but is empty - the case that fooled the app.
         Assert.True(Directory.Exists(remote));
 
         var resolved = service.Resolve(null, gameDir);
@@ -73,6 +71,56 @@ public class SaveLocationTests
         Assert.Equal(documents, resolved.Path);
         Assert.Equal(SaveFolderSource.ReportedByGame, resolved.Source);
         Assert.Equal(1, resolved.SaveFileCount);
+    }
+
+    [Fact]
+    public void TheMostRecentlyWrittenFolderWinsOverAStaleOne()
+    {
+        using var temp = new TempDir();
+        var (service, _, remote, gameDir) = Build(temp);
+        var documents = temp.Dir("Documents", "My Games", "Binding of Isaac Repentance+");
+        GiveReportedPath(gameDir, documents);
+
+        // Leftovers from over a week ago that nothing has touched since.
+        GiveSave(documents);
+        File.SetLastWriteTimeUtc(Path.Combine(documents, "rep+persistentgamedata1.dat"),
+                                 DateTime.UtcNow.AddDays(-9));
+
+        // The folder the game is really using, written moments ago.
+        GiveSave(remote);
+
+        var resolved = service.Resolve(null, gameDir);
+
+        // Presence alone said "Documents" and was wrong: both have files, and
+        // only recency tells them apart.
+        Assert.Equal(remote, resolved.Path, ignoreCase: true);
+        Assert.Equal(SaveFolderSource.SteamUserdata, resolved.Source);
+    }
+
+    [Fact]
+    public void AnEmptySteamFolderStillWinsWhenSteamHasBeenSyncingSaves()
+    {
+        using var temp = new TempDir();
+        var (service, _, remote, gameDir) = Build(temp);
+        var documents = temp.Dir("Documents", "My Games", "Binding of Isaac Repentance+");
+        GiveReportedPath(gameDir, documents);
+
+        // Stale decoy, and Steam's folder just emptied by "start a fresh save".
+        GiveSave(documents);
+        File.SetLastWriteTimeUtc(Path.Combine(documents, "rep+persistentgamedata1.dat"),
+                                 DateTime.UtcNow.AddDays(-9));
+
+        // Steam's manifest still shows it has been syncing saves for the app.
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(remote)!, "remotecache.vdf"),
+            "\"250900\"\n{\n\t\"rep+persistentgamedata1.dat\"\n\t{\n\t\t\"size\"\t\t\"6828\"\n\t}\n}\n");
+
+        var resolved = service.Resolve(null, gameDir);
+
+        // Emptied a minute ago is not the same as never used, and this is the
+        // exact state that made the app point at the decoy.
+        Assert.Equal(remote, resolved.Path, ignoreCase: true);
+        Assert.Equal(SaveFolderSource.SteamUserdata, resolved.Source);
+        Assert.Equal(0, resolved.SaveFileCount);
     }
 
     [Fact]
