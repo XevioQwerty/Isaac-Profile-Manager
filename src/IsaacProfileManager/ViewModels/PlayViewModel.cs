@@ -361,7 +361,9 @@ public sealed class PlayViewModel : ObservableObject
                     var result = sets.ActivateSet(pulled, build, _shell.Saves.CloudAcknowledged);
                     config.ActiveSaveSet = pulled.Name;
                     _shell.SaveConfig();
-                    message += $" Loaded it as the live saves; the previous ones are in {Path.GetFileName(result.Backup)}.";
+                    message += $" Loaded it as the live saves {result.Transport}; the previous ones are in {Path.GetFileName(result.Backup)}.";
+                    if (!result.ViaSteam)
+                        message += " Steam did not index the files itself, so if the game does not show them, start Steam and load the set again.";
                 }
                 else
                 {

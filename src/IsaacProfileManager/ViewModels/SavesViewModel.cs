@@ -1033,7 +1033,7 @@ public sealed class SavesViewModel : ObservableObject
             if (result.RepentogonState is { Skipped: false } r && r.Restored > 0) carried.Add("REPENTOGON state");
             var carriedText = carried.Count > 0 ? $" Restored {string.Join(" and ", carried)}." : string.Empty;
 
-            _shell.Report($"Loaded '{Selected.Name}'. Previous saves backed up to {Path.GetFileName(result.Backup)}.{carriedText}");
+            _shell.Report($"Loaded '{Selected.Name}' {result.Transport}. Previous saves backed up to {Path.GetFileName(result.Backup)}.{carriedText}");
         });
     }
 

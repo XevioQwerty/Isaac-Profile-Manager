@@ -148,6 +148,13 @@ if ($Live) {
             $null -ne $ready.subscribed
         }
 
+        Check 'helper lists the saves Steam knows (cloud-list)' {
+            $out = Invoke-Exe $helper @('cloud-list', '--game-dir', $gameDir) 60 |
+                   Where-Object { $_ -like '{*' }
+            $done = $out | Where-Object { $_ -like '*"event":"done"*' } | Select-Object -First 1
+            $done -and (($done | ConvertFrom-Json).ok -eq $true)
+        }
+
         Check 'helper gives up on an unsubscribable id instead of hanging' {
             $started = Get-Date
             Invoke-Exe $helper @('pull', '--game-dir', $gameDir, '--timeout', '600',

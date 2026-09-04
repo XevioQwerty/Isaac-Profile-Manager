@@ -114,17 +114,106 @@ public sealed class SteamUgc : IDisposable
     private static extern uint SteamAPI_ISteamUGC_GetSubscribedItems(
         IntPtr self, [Out] ulong[] publishedFileIds, uint maxEntries);
 
+    // --- ISteamRemoteStorage: the game's own door to its save folder ---------
+    // The game reads and writes saves through this interface, and Steam keeps
+    // a manifest (remotecache.vdf) of what it has been told about. A file
+    // copied into the folder behind Steam's back can be invisible — observed
+    // 2026-09-04, a run file Steam had marked deleted stayed "not found" to
+    // the game with the right bytes on disk. Writing through the API is what
+    // makes Steam index a file the way it indexes the game's own writes.
+
+    private static readonly string[] RemoteStorageAccessorNames =
+    {
+        "SteamAPI_SteamRemoteStorage_v016", "SteamAPI_SteamRemoteStorage_v017", "SteamAPI_SteamRemoteStorage_v015",
+        "SteamAPI_SteamRemoteStorage_v014",
+    };
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamRemoteStorage_FileWrite(IntPtr self, string file, byte[] data, int length);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern int SteamAPI_ISteamRemoteStorage_FileRead(IntPtr self, string file, byte[] data, int length);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamRemoteStorage_FileDelete(IntPtr self, string file);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamRemoteStorage_FileExists(IntPtr self, string file);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamRemoteStorage_FilePersisted(IntPtr self, string file);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+    private static extern int SteamAPI_ISteamRemoteStorage_GetFileSize(IntPtr self, string file);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int SteamAPI_ISteamRemoteStorage_GetFileCount(IntPtr self);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SteamAPI_ISteamRemoteStorage_GetFileNameAndSize(IntPtr self, int index, out int size);
+
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool SteamAPI_ISteamRemoteStorage_IsCloudEnabledForApp(IntPtr self);
+
     private static IntPtr _module = IntPtr.Zero;
     private readonly IntPtr _ugc;
     private readonly IntPtr _apps;
     private readonly IntPtr _user;
+    private readonly IntPtr _storage;
     private bool _shutdown;
 
-    private SteamUgc(IntPtr ugc, IntPtr apps, IntPtr user)
+    private SteamUgc(IntPtr ugc, IntPtr apps, IntPtr user, IntPtr storage)
     {
         _ugc = ugc;
         _apps = apps;
         _user = user;
+        _storage = storage;
+    }
+
+    public bool HasRemoteStorage => _storage != IntPtr.Zero;
+
+    private IntPtr Storage => _storage != IntPtr.Zero
+        ? _storage
+        : throw new SteamHelperException("steam_api.dll exposes no ISteamRemoteStorage version this build knows.");
+
+    public bool? CloudEnabledForApp() =>
+        _storage == IntPtr.Zero ? null : SteamAPI_ISteamRemoteStorage_IsCloudEnabledForApp(_storage);
+
+    /// <summary>Every file Steam knows for the app, as the game would see them.</summary>
+    public IReadOnlyList<(string Name, int Size, bool Persisted)> CloudFiles()
+    {
+        var count = SteamAPI_ISteamRemoteStorage_GetFileCount(Storage);
+        var files = new List<(string, int, bool)>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var namePointer = SteamAPI_ISteamRemoteStorage_GetFileNameAndSize(Storage, i, out var size);
+            var name = Marshal.PtrToStringAnsi(namePointer);
+            if (string.IsNullOrEmpty(name)) continue;
+            files.Add((name, size, SteamAPI_ISteamRemoteStorage_FilePersisted(Storage, name)));
+        }
+        return files;
+    }
+
+    public bool CloudFileExists(string name) => SteamAPI_ISteamRemoteStorage_FileExists(Storage, name);
+
+    /// <summary>Write a file through Steam, so it is indexed exactly as a game write would be.</summary>
+    public bool CloudWrite(string name, byte[] data) => SteamAPI_ISteamRemoteStorage_FileWrite(Storage, name, data, data.Length);
+
+    public bool CloudDelete(string name) => SteamAPI_ISteamRemoteStorage_FileDelete(Storage, name);
+
+    /// <summary>Read a file back through Steam — the proof that the game will see it.</summary>
+    public byte[]? CloudRead(string name)
+    {
+        var size = SteamAPI_ISteamRemoteStorage_GetFileSize(Storage, name);
+        if (size < 0) return null;
+        var buffer = new byte[size];
+        var read = SteamAPI_ISteamRemoteStorage_FileRead(Storage, name, buffer, size);
+        return read == size ? buffer : null;
     }
 
     /// <summary>
@@ -163,9 +252,9 @@ public sealed class SteamUgc : IDisposable
                 "steam_api.dll exposes no ISteamUGC version this build knows. The game's Steamworks SDK has moved on.");
         }
 
-        // Apps and User are best-effort: without them the ownership check is
-        // simply unavailable, which is worse than having it but not fatal.
-        return new SteamUgc(ugc, Resolve(AppsAccessorNames), Resolve(UserAccessorNames));
+        // Apps, User and RemoteStorage are best-effort: without them the
+        // ownership check or the save verbs are unavailable, not the whole helper.
+        return new SteamUgc(ugc, Resolve(AppsAccessorNames), Resolve(UserAccessorNames), Resolve(RemoteStorageAccessorNames));
     }
 
     private static IntPtr Resolve(string[] candidates)

@@ -39,7 +39,14 @@ public sealed record SaveSwapPreconditions(
 public sealed record SaveFileState(string FileName, long Length, string Sha1, DateTime Modified);
 
 /// <summary>What an activation did beyond the save files themselves.</summary>
-public sealed record SaveActivation(string Backup, CarryReport? ModData, CarryReport? RepentogonState);
+public sealed record SaveActivation(string Backup, CarryReport? ModData, CarryReport? RepentogonState)
+{
+    /// <summary>How the save files reached the live folder: through Steam's API, or a file copy and why.</summary>
+    public string Transport { get; init; } = "file copy";
+
+    /// <summary>True when the files went through Steam, so the game is certain to see them.</summary>
+    public bool ViaSteam { get; init; }
+}
 
 /// <summary>One earlier revision of a set, filed before it was overwritten.</summary>
 public sealed record HistoryEntry(
@@ -93,6 +100,13 @@ public sealed class SaveSetOptions
 
     /// <summary>How many revisions to keep per set. History entries are copies, so pruning loses nothing unique.</summary>
     public int HistoryKeep { get; init; } = 30;
+
+    /// <summary>
+    /// Writes live save files through Steam's API when the live folder is
+    /// Steam's. Null, or unavailable, means a plain file copy — which Steam
+    /// can leave invisible to the game if it holds a "deleted" mark for the name.
+    /// </summary>
+    public ISteamSaveWriter? SteamWriter { get; init; }
 }
 
 /// <summary>
@@ -1038,23 +1052,64 @@ public sealed class SaveSetService
 
         var backup = BackupLive($"before-{set.Name}");
 
-        // Remove only the save files this tool recognises, so anything else
-        // Steam keeps in that folder is left alone.
-        foreach (var existing in ReadLive())
-            File.Delete(Path.Combine(folder, existing.FileName));
+        var removeNames = ReadLive().Select(f => f.FileName).ToList();
+        var writeNames = new DirectoryInfo(source).GetFiles()
+            .Where(f => !f.Name.Equals(MetadataFileName, StringComparison.OrdinalIgnoreCase))
+            .Select(f => f.Name)
+            .ToList();
 
-        foreach (var file in new DirectoryInfo(source).GetFiles())
-        {
-            if (file.Name.Equals(MetadataFileName, StringComparison.OrdinalIgnoreCase)) continue;
-            File.Copy(file.FullName, Path.Combine(folder, file.Name), overwrite: true);
-        }
+        var (viaSteam, transport) = ReplaceLiveFiles(folder, source, removeNames, writeNames);
 
         var modData = set.ModDataCaptured ? ModData.Restore(source, set.Slots) : null;
         var repentogon = set.RepentogonStateCaptured ? RepentogonState.Restore(source, set.Slots) : null;
 
         set.LastUsedUtc = DateTime.UtcNow.ToString("o");
         SaveSetMetadata(set);
-        return new SaveActivation(backup, modData, repentogon);
+        return new SaveActivation(backup, modData, repentogon) { ViaSteam = viaSteam, Transport = transport };
+    }
+
+    /// <summary>
+    /// Make the live folder hold exactly the named files from a source folder.
+    ///
+    /// When the live folder is Steam's and the helper can reach Steam, the
+    /// files go through Steam's own API, so its manifest is right by
+    /// construction. Otherwise — Steam closed, helper missing, the folder
+    /// somewhere Steam does not own — a file copy, which is what the game's
+    /// folder tolerates except for a name Steam still holds as deleted.
+    /// Removes only the save files this tool recognises either way, so
+    /// anything else Steam keeps in that folder is left alone.
+    /// </summary>
+    private (bool ViaSteam, string Transport) ReplaceLiveFiles(string liveFolder, string source,
+                                                               IReadOnlyList<string> removeNames, IReadOnlyList<string> writeNames)
+    {
+        var writer = _options.SteamWriter;
+        if (writer is { IsAvailable: true } && ResolveLiveFolder().Source == SaveFolderSource.SteamUserdata)
+        {
+            var result = writer.Replace(removeNames, writeNames, source);
+            if (result.Ok)
+                return (true, $"through Steam ({result.Written.Count} written, {result.Deleted.Count} removed)");
+
+            // Fall through to the copy, but say so: the game may not see a
+            // name Steam holds as deleted until Steam has been told about it.
+            var why = string.Join("; ", result.Problems);
+            CopyLiveFiles(liveFolder, source, removeNames, writeNames);
+            return (false, $"file copy — Steam's API could not be used ({why})");
+        }
+
+        CopyLiveFiles(liveFolder, source, removeNames, writeNames);
+        return (false, writer is null ? "file copy" : "file copy — Steam helper not available");
+    }
+
+    private static void CopyLiveFiles(string liveFolder, string source, IReadOnlyList<string> removeNames, IReadOnlyList<string> writeNames)
+    {
+        foreach (var name in removeNames)
+        {
+            var path = Path.Combine(liveFolder, name);
+            if (File.Exists(path)) File.Delete(path);
+        }
+
+        foreach (var name in writeNames)
+            File.Copy(Path.Combine(source, name), Path.Combine(liveFolder, name), overwrite: true);
     }
 
     /// <summary>
@@ -1112,19 +1167,15 @@ public sealed class SaveSetService
 
         var safety = BackupLive("before-restore");
 
-        foreach (var existing in ReadLive())
-            File.Delete(Path.Combine(folder, existing.FileName));
-
         // Only save files. A backup can be a deleted set's folder, which carries
         // set.json, and copying that in left our own bookkeeping sitting in the
         // game's save directory — observed on the reference install.
-        var restored = new List<string>();
-        foreach (var file in new DirectoryInfo(source).GetFiles())
-        {
-            if (!IsSaveFile(file.Name)) continue;
-            File.Copy(file.FullName, Path.Combine(folder, file.Name), overwrite: true);
-            restored.Add(file.Name);
-        }
+        var removeNames = ReadLive().Select(f => f.FileName).ToList();
+        var restored = new DirectoryInfo(source).GetFiles()
+            .Where(f => IsSaveFile(f.Name))
+            .Select(f => f.Name)
+            .ToList();
+        ReplaceLiveFiles(folder, source, removeNames, restored);
 
         // A 2.0 backup carries mod data and REPENTOGON state beside the saves;
         // a 1.x one does not, and its absence must leave the live copies alone.

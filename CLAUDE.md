@@ -132,6 +132,28 @@ Run the tests before touching anything under `Services/`:
   inert for this app here.** Do not assume the same on a legitimately owned copy
   — keep the "back up before swapping" and "close Steam first" rules regardless,
   since they cost nothing and are the only defence if Cloud is live.
+- **A file dropped into `remote\` is not necessarily visible to the game.**
+  Found 2026-09-04 syncing a run between two machines: the desktop's live
+  folder held `rep+gamestate2.dat` (right bytes, right size) and the game
+  logged `SteamCloud could not find or open rep+gamestate2.dat`. The game
+  reads saves through Steam's Remote Storage API, which answers from
+  `remotecache.vdf`, and that entry carried `"persiststate" "2"` — Steam's
+  mark for a file the game had deleted (the desktop's own earlier slot-2 run
+  had ended). Steam re-indexed the new bytes (size and sha updated) but kept
+  the deleted flag, so the API said the file did not exist. With Steam
+  exited, setting `persiststate` to `0` and relaunching made "Continue"
+  appear. So: **`persiststate 0` = live, `2` = deleted-by-the-game**, and
+  a copy into the folder cannot clear it. The fix that holds is to write
+  save files through `ISteamRemoteStorage::FileWrite` from the 32-bit
+  helper, which is what the game itself does; a file copy stays as the
+  fallback when Steam is not running. **Verified the same day**: the
+  helper's `cloud-replace` wrote a probe file and Steam's manifest listed it
+  with `persiststate 0` at once, with Steam running and Cloud off for the
+  app; `FileDelete` removed files and their entries. `cloud-list` reports
+  what the game will see (`persisted` per file — the stray `set.json` showed
+  `false`, the saves `true`). Consequence for the old advice: **swap saves
+  with Steam running**, not closed, so the write goes through the API. The
+  accessor is `SteamAPI_SteamRemoteStorage_v016` on this build.
 - **Steam's per-game Cloud toggle is readable**, at
   `<Steam>\userdata\<accountid>\7\remote\sharedconfig.vdf`, path
   `UserRoamingConfigStore\Software\Valve\Steam\apps\<appid>\cloudenabled`.

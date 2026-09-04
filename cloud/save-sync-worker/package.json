@@ -1,7 +1,7 @@
 {
   "name": "ipm-save-sync",
   "private": true,
-  "version": "2.5.2",
+  "version": "2.5.3",
   "description": "Lane store for Isaac Profile Manager save sync: a Cloudflare Worker over an R2 bucket.",
   "scripts": {
     "setup": "wrangler r2 bucket create ipm-saves",

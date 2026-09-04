@@ -58,9 +58,74 @@ public static class Program
             "subscribe" => SubscribeOnly(steam, options),
             "unsubscribe" => Unsubscribe(steam, options.Ids, options),
             "unsubscribe-all" => Unsubscribe(steam, steam.SubscribedItems(), options),
+            "cloud-list" => CloudList(steam),
+            "cloud-replace" => CloudReplace(steam, options),
             _ => throw new SteamHelperException(
-                $"Unknown verb '{options.Verb}'. Expected status, pull, subscribe, unsubscribe or unsubscribe-all."),
+                $"Unknown verb '{options.Verb}'. Expected status, pull, subscribe, unsubscribe, unsubscribe-all, cloud-list or cloud-replace."),
         };
+    }
+
+    // --- Saves through Steam's own API ---------------------------------------
+    // The game reads its saves through ISteamRemoteStorage, and Steam only
+    // answers for files it has indexed. A file copied into the folder can be
+    // invisible to it. These verbs write and delete through the API so the
+    // index is right by construction; the parent verifies each write by
+    // reading it back the same way the game will.
+
+    private static int CloudList(SteamUgc steam)
+    {
+        Emit("cloud", new() { ["enabled"] = steam.CloudEnabledForApp(), ["storage"] = steam.HasRemoteStorage });
+        foreach (var (name, size, persisted) in steam.CloudFiles())
+            Emit("file", new() { ["name"] = name, ["size"] = size, ["persisted"] = persisted });
+        return Done(true);
+    }
+
+    /// <summary>
+    /// Delete the named files, then write the named files from a folder.
+    /// Deletes first so a name in both lists ends up written. Each write is
+    /// read back through the API and compared, because "FileWrite returned
+    /// true" is not the same as "the game will find it".
+    /// </summary>
+    private static int CloudReplace(SteamUgc steam, Options options)
+    {
+        if (!steam.HasRemoteStorage)
+            throw new SteamHelperException("Steam did not expose ISteamRemoteStorage, so saves cannot be written through it.");
+
+        var ok = true;
+        foreach (var name in options.DeleteNames)
+        {
+            var existed = steam.CloudFileExists(name);
+            var deleted = !existed || steam.CloudDelete(name);
+            Emit("deleted", new() { ["name"] = name, ["existed"] = existed, ["ok"] = deleted });
+            ok &= deleted;
+        }
+
+        foreach (var name in options.WriteNames)
+        {
+            var source = Path.Combine(options.From, name);
+            if (!File.Exists(source))
+            {
+                Emit("written", new() { ["name"] = name, ["ok"] = false, ["reason"] = "source missing" });
+                ok = false;
+                continue;
+            }
+
+            var data = File.ReadAllBytes(source);
+            var wrote = steam.CloudWrite(name, data);
+            var back = wrote ? steam.CloudRead(name) : null;
+            var verified = back is not null && back.AsSpan().SequenceEqual(data);
+            Emit("written", new()
+            {
+                ["name"] = name,
+                ["bytes"] = data.Length,
+                ["ok"] = verified,
+                ["reason"] = !wrote ? "FileWrite refused" : !verified ? "read back differs" : null,
+            });
+            ok &= verified;
+        }
+
+        steam.RunCallbacks();
+        return Done(ok);
     }
 
     /// <summary>
@@ -331,6 +396,11 @@ public static class Program
         public TimeSpan Stall { get; private set; } = TimeSpan.FromSeconds(45);
         public List<ulong> Ids { get; } = new();
 
+        /// <summary>cloud-replace: the folder holding the files to write, and the names to delete and write.</summary>
+        public string From { get; private set; } = string.Empty;
+        public List<string> DeleteNames { get; } = new();
+        public List<string> WriteNames { get; } = new();
+
         public static Options Parse(string[] args)
         {
             if (args.Length == 0)
@@ -356,6 +426,15 @@ public static class Program
                     case "--stall":
                         options.Stall = TimeSpan.FromSeconds(ParseSeconds(Next(args, ref i, "--stall")));
                         break;
+                    case "--from":
+                        options.From = Next(args, ref i, "--from");
+                        break;
+                    case "--delete":
+                        options.DeleteNames.Add(SaveName(Next(args, ref i, "--delete")));
+                        break;
+                    case "--write":
+                        options.WriteNames.Add(SaveName(Next(args, ref i, "--write")));
+                        break;
                     default:
                         if (!ulong.TryParse(args[i], out var id))
                             throw new SteamHelperException($"'{args[i]}' is not a published file id.");
@@ -366,10 +445,26 @@ public static class Program
 
             if (options.GameDir.Length == 0)
                 throw new SteamHelperException("--game-dir is required.");
-            if (options.Verb is not ("status" or "unsubscribe-all") && options.Ids.Count == 0)
+            if (options.Verb is "cloud-replace")
+            {
+                if (options.WriteNames.Count > 0 && options.From.Length == 0)
+                    throw new SteamHelperException("cloud-replace --write needs --from <folder>.");
+                if (options.WriteNames.Count == 0 && options.DeleteNames.Count == 0)
+                    throw new SteamHelperException("cloud-replace needs at least one --delete or --write.");
+            }
+            else if (options.Verb is not ("status" or "unsubscribe-all" or "cloud-list") && options.Ids.Count == 0)
                 throw new SteamHelperException($"'{options.Verb}' needs at least one published file id.");
 
             return options;
+        }
+
+        /// <summary>A bare file name: the API addresses files by name inside the app's folder, never by path.</summary>
+        private static string SaveName(string value)
+        {
+            if (value.Length == 0 || value.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                value.Contains('/') || value.Contains('\\') || value == "." || value == "..")
+                throw new SteamHelperException($"'{value}' is not a save file name.");
+            return value;
         }
 
         private static string Next(string[] args, ref int i, string flag) =>

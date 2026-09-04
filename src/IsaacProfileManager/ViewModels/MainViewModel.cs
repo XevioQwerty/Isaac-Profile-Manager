@@ -224,6 +224,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 DeviceId = config.DeviceId,
                 DeviceName = config.DeviceName,
                 ReadGameVersion = () => new LogReaderService().ReadGameVersion(),
+                SteamWriter = string.IsNullOrWhiteSpace(config.GameDir) ? null : new SteamHelperSaveWriter(config.GameDir),
             });
     }
 
