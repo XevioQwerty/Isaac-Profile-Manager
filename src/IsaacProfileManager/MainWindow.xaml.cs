@@ -31,9 +31,18 @@ public partial class MainWindow : Window
 
         WindowGeometry.Restore(this);
 
-        Activated += (_, _) => _viewModel.RefreshStatusBar();
+        Activated += (_, _) => _viewModel.OnWindowActivated();
         Closing += (_, _) => WindowGeometry.Save(this);
-        Closed += (_, _) => _statusTimer.Stop();
+        Closed += (_, _) => { _statusTimer.Stop(); _viewModel.Dispose(); };
+    }
+
+    /// <summary>The three Mods segments are a tab strip inside a rail item, and refresh the same way.</summary>
+    private void OnModsTabChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, ModsTabs)) return;
+
+        _viewModel.SelectedModsSegment = ModsTabs.SelectedIndex;
+        _viewModel.RefreshSelectedTab(MainViewModel.ModsTab);
     }
 
     /// <summary>

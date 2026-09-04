@@ -590,6 +590,7 @@ public sealed class BuildVariantsViewModel : ObservableObject
             OnPropertyChanged(nameof(LinkPathText));
             OnPropertyChanged(nameof(BuildRootText));
             OnPropertyChanged(nameof(CanInitialize));
+            OnPropertyChanged(nameof(UsesBuildFolders));
             OnPropertyChanged(nameof(IsSwitchable));
         }
     }
@@ -615,6 +616,14 @@ public sealed class BuildVariantsViewModel : ObservableObject
     public bool CanInitialize =>
         Status is not null &&
         (Status.State is BuildLinkState.RealFolder or BuildLinkState.Absent || Status.Variants.Count < 2);
+
+    /// <summary>
+    /// Build-folder switching is only worth a card on an install that already
+    /// uses it. Patches cover the case it was built for, so a plain install —
+    /// a real Repentogon\ folder — shows nothing about it rather than an
+    /// invitation to set it up.
+    /// </summary>
+    public bool UsesBuildFolders => Status?.State is BuildLinkState.Linked or BuildLinkState.LinkedElsewhere;
 
     public string StateHeadline => Status?.State switch
     {

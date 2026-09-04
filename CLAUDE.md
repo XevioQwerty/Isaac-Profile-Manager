@@ -22,7 +22,10 @@ which is retained for command-line and shortcut switching. Both read and write
 the same `isaac-profiles.json` at `ConfigVersion 3` — **do not bump that version
 without updating `Assert-Config` in `IsaacProfiles.ps1`**, which refuses to run
 below 3. New keys are added additively; both sides preserve keys they do not
-recognise. See `PLAN.md` for what is built and what remains.
+recognise. See `PLAN.md` for what is built and what remains, and
+`docs/multi-device.md` for the current piece of work: a second machine, save
+sets that travel, a save set that insists on the profile it was made with, and
+in-app sharing by link.
 
 ```
 src/IsaacProfileManager.Core/   services, models, config store — all the risky IO
@@ -161,11 +164,91 @@ Run the tests before touching anything under `Services/`:
   claimed; it deliberately copies between them. Any save switcher must carry
   this file with the set or REPENTOGON will reconcile the new save against stale
   checksums. **This is the concrete mechanism behind the achievement-loss risk.**
+- **How that sync actually decides — probed 2026-09-04, six launches on
+  throwaway slots 2 and 3.** REPENTOGON runs `SaveSyncing` for every slot on
+  launch and again on exit, and writes its decisions to
+  `<GameDir>\Repentogon\repentogon.log` (truncated per session — read it right
+  after the run). Per slot it reads both twins (`rep+…` and `rgon_steam_…`),
+  computes a checksum and a save **Counter** for each, and compares the
+  checksums with `rgon_savesyncstatus.json`:
+  - Neither twin differs from the status → `No synchronization required`.
+  - **Exactly one differs → that twin is copied chunk-by-chunk over the
+    other**, silently. Observed: an older REPENTOGON file restored beside a
+    newer vanilla twin was overwritten from the vanilla twin on the next
+    launch. *This is the cross-device restore hazard*: a set that carries one
+    build's file onto a machine holding the other build's newer twin is undone
+    on launch. `Activate` is safe only because it deletes every live save file
+    before copying the set in — keep that. A lane must carry both twins and
+    the status file together.
+  - **Both differ → `Detected potential external REPENTOGON save file
+    modification. Performing a full synchronization...`** and it merges both
+    ways. Never a prompt, in any case.
+  - No vanilla twin → nothing for that slot. REPENTOGON *creates* REPENTOGON
+    twins from existing vanilla files on launch (slots 1 and 3 appeared the
+    moment it first ran) but never creates a vanilla twin from a REPENTOGON
+    file.
+  Two side facts from the same runs: the game **loads and re-saves slot 1 on
+  every launch** whatever slot you open (its Counter goes up, so its hash
+  changes without any play — drift detection must expect that), and
+  `rep+gamestate<N>.dat` carries a checksum bound to its
+  `persistentgamedata<N>.dat`; put one back without the other and `log.txt`
+  says `[warn] GameState File : Checksum invalid!` and the run is discarded.
+  The Saves tab's "carry the run file with the set" rule is therefore load
+  bearing, not tidy.
+- **The save file's layout, as REPENTOGON logs it.** Header `ISAACNGSAVE09R`,
+  then eleven chunks in order: Achievements (1) @32, Event Counters (2),
+  Level Counters (3), Collectibles (4), Minibosses (5), Bosses (6),
+  Challenges (7), Cutscenes (8), Settings (9), Special Seeds (10),
+  Bestiary (11); each with `sizeWritten` and `numElements`, then a `Counter`
+  and a `Checksum`. Enough to build a read-only save viewer against, and
+  matches what Zamiell's `isaac-save-viewer` parses.
 - What REPENTOGON does *not* solve is that there are still only **three slots**.
   Separating saves per person + modpack + build is the actual reason to build a
   save switcher.
 - Save state feeds unlock state, which feeds item pool composition, which feeds
   RNG. Mismatched saves between players desync within seconds.
+- **`GameBuild` is not the same thing as the build number.** It separates
+  vanilla from REPENTOGON and cannot separate retail J460 from J273 — and two of
+  your own machines drift apart the moment one updates and the other does not.
+  Once saves cross a machine boundary the recorded `Game Version:` from
+  `log.txt` becomes a second, independent check. The existing build block is
+  necessary and no longer sufficient.
+- **`.saves\` is machine-local and stays in `.stignore`.** What travels between
+  your own devices is `.savesync\<device-id>\`, a lane each device alone writes,
+  so a sync client can never produce a conflict on a save file. Reconciling
+  lanes into `.saves\` is the app's job, not the sync client's — that is where
+  "Isaac is closed" can be checked. See `docs/multi-device.md`.
+- **The save folder is not the whole save.** Verified 2026-09-03 on the
+  reference install, two more per-slot stores exist outside it:
+  - **Mod save data** at `<GameDir>\data\<mod folder name>\save<N>.dat` — 11
+    mod folders, the largest 33 KB. The folder is named after the mod's folder
+    under `mods\`, and on this install those names matched the suffix-free
+    library names exactly. Renaming a mod strands its data. This is state
+    produced alongside `persistentgamedata<N>.dat` (mod unlocks feed pools,
+    which feed RNG), and until 2.0 no save set carried it.
+  - **REPENTOGON's modded unlock state** at
+    `Documents\My Games\Binding of Isaac Repentance+\Repentogon\achievements<N>.json`
+    and `completionmarks<N>.json`, keyed by Workshop id inside. Same folder
+    holds `ItemPoolManager\`, `EntitySaveStateManagement\` and
+    `VirtualRoomSetManager\` subfolders whose contents are not yet understood.
+  `SlotStateCarrier` captures both into the set (`moddata\`, `repentogon\`) and
+  restores them on activation — only for a set that captured them, so a 1.x set
+  never clears live mod data on activation. `ModDataCaptured` /
+  `RepentogonStateCaptured` on the set are the flags that say so.
+- **Repentance+ writes its own desync dumps and session snapshots.** Found
+  2026-09-03 under `Documents\My Games\Binding of Isaac Repentance+\online_logs\`:
+  `desyncs\<MM_dd_yyyy__HH_mm_ss>__<player>\` holds `desync_diff.txt` (player
+  ids, the checksum table, then per-entity `Type Mismatch!` / `Missing!` rows),
+  `desync_framestate.txt`, a 350 KB `desync_rng_history.txt` with call stacks
+  per RNG roll, a screenshot, and `desync_shared_save.dat`;
+  `sessions\<stamp>\` holds a copy of `log.txt` plus
+  `persistentgamedata<N>_begin.dat`/`_end.dat` and `sharedsave_begin/end.dat`.
+  Two consequences: the Diagnose screen should read these rather than only the
+  checksum table in `log.txt`, and **online play has a shared save** whose role
+  in unlock-state sync is unverified (see below).
+- **A stray `set.json` was found in `remote\`** — residue of the bug the
+  `RestoreBackup` comment describes. Harmless to the game (it only reads its
+  own filenames), but worth a one-time cleanup.
 
 ### Steam Workshop
 
@@ -281,12 +364,21 @@ Run the tests before touching anything under `Services/`:
   (`3775687336`, 29 children). A non-collection id comes back as `result 9` —
   report that rather than returning an empty list, which reads as "empty
   collection" and sends the user the wrong way.
-- **A self-contained share code cannot be short.** A published file id needs
-  ~34 bits, so 40 ids is ~227 base64 chars at optimal packing before a single
-  name or hash. Measured on the reference library: 42 mods = **3,679 chars**
-  with hashes, **1,309** without (entry names dominate, not ids). Roughly 100
-  chars buys 17 ids and nothing else. A Steam collection id is short only
-  because Steam stores the list. Do not promise a short self-contained code.
+- **A self-contained share code cannot be short — so do not send one.** A
+  published file id needs ~34 bits, so 40 ids is ~227 base64 chars at optimal
+  packing before a single name or hash. Measured on the reference library:
+  42 mods = **3,679 chars** with hashes, **1,309** without (entry names
+  dominate, not ids). Roughly 100 chars buys 17 ids and nothing else.
+  A Steam collection id is short only because Steam **stores the list** — which
+  is the conclusion, not a footnote: store the list and send a link.
+  `ShareCodeService` was removed for exactly this reason; see
+  `docs/multi-device.md`. The measurement stays recorded so nobody proposes a
+  short self-contained code again.
+- **A mod profile share is a manifest, not a payload.** `SharedProfile` is entry
+  names, Workshop ids and hashes — a few KB — and the recipient refetches the
+  mods from Steam. Bytes only ever need to travel for entries with no Workshop
+  id, the `ShareItemAction.Unfetchable` case. Anything that proposes uploading
+  the library has misread the problem.
 - Import must install under **the sender's entry name**, not one derived from
   the downloaded `metadata.xml`. The share's manifest refers to the sender's
   names, and a name that drifts leaves the profile pointing at nothing;
@@ -306,6 +398,43 @@ Run the tests before touching anything under `Services/`:
   build is installed it returns immediately, otherwise it hides the HUD and
   draws an install warning. Safe to unsubscribe when REPENTOGON is installed via
   the launcher.
+
+### Hosting a share drop
+
+**Provenance note:** unlike everything above, these come from vendor
+documentation rather than from probing this install. They were checked
+2026-09-01 and vendors change limits — re-check before relying on a number.
+
+- **Cloudflare's proxy caps request bodies at 100 MB** on the Free and Pro
+  plans (200 MB Business, 500 MB Enterprise). Anything uploaded *through* a
+  Worker on a proxied hostname inherits that cap. **Presign and upload straight
+  to R2 instead** — R2 objects go to 5 TB. This is the difference between a
+  design that works and one that fails the first time someone shares a large
+  off-Workshop mod.
+- **R2's free tier**: 10 GB stored, 1M Class A and 10M Class B operations a
+  month, and **no egress charge at all**. At a few KB per share this is
+  effectively unmetered for this use.
+- **R2 multipart requires every part to be exactly the same size except the
+  last.** S3 and MinIO allow varying part sizes; an S3 SDK left on its defaults
+  produces parts R2 rejects.
+- **Object expiry is a bucket lifecycle rule**, not something to schedule.
+- **R2 must be enabled per account in the dashboard before wrangler can
+  create a bucket**, and enabling it asks for a payment method even for the
+  free tier. Observed 2026-09-04: `wrangler r2 bucket create` fails with
+  `code: 10042 Please enable R2 through the Cloudflare Dashboard` until then.
+  Workers themselves need nothing of the sort: the save-sync Worker deployed
+  to `https://ipm-save-sync.<account>.workers.dev` with no custom domain.
+- **Save sync lanes live behind `cloud/save-sync-worker`.** The sync key is
+  the bearer token and, hashed, the namespace; the Worker refuses anything
+  that is not a zip or a schema-1 manifest naming its own path, and refuses a
+  manifest whose pack has not arrived. Verified with curl against the live
+  deployment: 401 without a key, 409 for manifest-before-pack, 400 for a
+  non-zip, and an empty listing under a different key.
+- **Oracle reclaims idle Always Free compute.** An instance counts as idle when,
+  across a 7-day window, the 95th percentile of CPU, network *and* memory are
+  all below 20%. A share endpoint serving a few KB a week meets that definition,
+  so the VPS is the wrong home for one unless something keeps it busy. It is a
+  fine home for a *stateful* service behind a Cloudflare Tunnel later.
 
 ### Desync diagnosis
 
@@ -366,10 +495,56 @@ Flag these rather than assuming:
 - Whether Steam rewrites `remote\` from the cloud on next start after files are
   swapped underneath it, and whether disabling Steam Cloud for the app stops
   that. **Test with a throwaway save before shipping save switching.**
-- What REPENTOGON does when `rgon_savesyncstatus.json` checksums do not match
-  the `.dat` files beside it — reconcile silently, or prompt.
+- ~~What REPENTOGON does when `rgon_savesyncstatus.json` checksums do not match
+  the `.dat` files beside it.~~ **Resolved 2026-09-04** — see "How that sync
+  actually decides" under Saves. Reconciles silently; the changed twin wins,
+  both changed merges. Sync must carry both twins and the status file.
 - Whether a non-`1` vanilla slot (`rep+persistentgamedata2/3.dat`) is ever
   created; only slot 1 exists on the reference install.
+- ~~Whether a second machine on the same Steam account gets the same
+  `userdata\<accountid>` number under a different root.~~ **Confirmed
+  2026-09-04** on the laptop: same `351019201`, same default Steam root, Cloud
+  explicitly `"0"` there too, one 4,068-byte `rep+persistentgamedata1.dat`
+  from 2026-08-17. The laptop runs the same non-Steam copy, REPENTOGON and
+  vanilla. `SaveLocationService` resolves per-machine either way.
+- Whether the game's `log.txt` `Game Version:` line is reliably present at the
+  moment a save is captured. Capture records it, and a missing value has to
+  degrade to a warning rather than a block.
+- **Where the game saves when Steam is not running.** Found 2026-09-03: a
+  `rep+persistentgamedata1.dat` (6,828 bytes, written 2026-08-29 06:17) sitting
+  in `Documents\My Games\Binding of Isaac Repentance+\` beside `log.txt`. Its
+  hash matches nothing the app ever captured or backed up, and the userdata
+  copy was written later (2026-08-31) with Cloud already off — so Cloud-off
+  alone does not move the save. Zamiell's FAQ says the Documents folder is the
+  non-Steam location. **The game names its save transport on every launch**:
+  `Loading PersistentGameData from Steam Cloud: rep+persistentgamedata1.dat.`
+  and `Saving PersistentGameData to Steam Cloud: …` — and the archived logs
+  for the sessions bracketing 06:17 (launched 06:15:41 and 06:17:41) both say
+  Steam Cloud, as does every one of the 40 archived logs. So the game did not
+  write that file. The likelier author is **this app**: `SaveLocationService`
+  can resolve the live folder to the path in `savedatapath.txt` (which names
+  the Documents folder) when `remotecache.vdf` lists no saves — exactly the
+  state after Steam rewrote it on 08-17 — and an activation then copies a set
+  there. `LogReaderService.SaveTransport` now parses the line, so the app can
+  show what the game actually used.
+  **Probed 2026-09-03: an offline launch is not reachable on this install.**
+  With the Steam client fully exited, double-clicking `isaac-ng.exe` started
+  Steam, which then ran the game through its own launch options
+  (REPENTOGONLauncher, `--repentogonoff`, J460). Nothing under Documents or
+  userdata changed apart from `options.ini`, `savedatapath.txt` and `log.txt`;
+  Steam touched `remotecache.vdf` without changing it. So "close Steam" can
+  never strand a save in Documents, and the stray file is the app's doing.
+  Two smaller facts from the same run: the game rewrites `savedatapath.txt`
+  on every start, still naming the Documents folder it does not use; and the
+  `PersistentGameData from …` line only appears once a slot is opened — that
+  run ended with Alt+F4 at the main menu, which logged the version but no
+  save transport, as expected. Whether an *offline* launch is possible at all
+  (say with `steam_appid.txt` beside the exe) was not tested and is not
+  something this app should encourage.
+- **Whether Repentance+ online play distributes one unlock state to the
+  lobby** via the `sharedsave_*.dat` seen in `online_logs\sessions\`. If it
+  does, the "save state mismatch" desync cause may only apply to local co-op
+  and pre-Rep+ builds. Needs a second player to probe.
 
 Resolved since first written — see "Verified facts" above: `savedatapath.txt`
 (informational only), the real save location and filenames, REPENTOGON's

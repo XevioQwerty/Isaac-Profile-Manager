@@ -81,6 +81,19 @@ public sealed class PathToImageConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+/// <summary>
+/// True when the bound string equals the converter parameter. Lets a group of
+/// radio buttons bind to one string property, one value each.
+/// </summary>
+public sealed class EqualsToBoolConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        string.Equals(value?.ToString(), parameter?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is true ? parameter?.ToString() : Binding.DoNothing;
+}
+
 /// <summary>Non-empty string to Visible. Used to hide labels that have nothing to say.</summary>
 public sealed class StringToVisibilityConverter : IValueConverter
 {

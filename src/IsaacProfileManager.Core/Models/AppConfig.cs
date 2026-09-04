@@ -120,6 +120,76 @@ public sealed class AppConfig
     [JsonPropertyName("ProfileNotes")]
     public Dictionary<string, string> ProfileNotes { get; set; } = new();
 
+    // --- Added in 2.0 -------------------------------------------------------
+    // Still ConfigVersion 3: every key here is optional, and the PowerShell
+    // script preserves what it does not recognise.
+
+    /// <summary>
+    /// The save set last activated or captured on this machine. Advisory: the
+    /// live files are hashed against every set to find out what is really
+    /// loaded, and this only breaks a tie or names a set that has drifted.
+    /// </summary>
+    [JsonPropertyName("ActiveSaveSet")]
+    public string? ActiveSaveSet { get; set; }
+
+    /// <summary>Stable id for this machine, written once. Save sets record which device captured them.</summary>
+    [JsonPropertyName("DeviceId")]
+    public string? DeviceId { get; set; }
+
+    /// <summary>Friendly name for this machine. Defaults to the machine name.</summary>
+    [JsonPropertyName("DeviceName")]
+    public string? DeviceName { get; set; }
+
+    /// <summary>The last <c>Game Version:</c> this machine ran, read from log.txt after each session.</summary>
+    [JsonPropertyName("LastGameVersion")]
+    public string? LastGameVersion { get; set; }
+
+    /// <summary>
+    /// The last version each build ran here. A version belongs to a build:
+    /// REPENTOGON is pinned to J273 while retail moves, so the number to check
+    /// a save against is the one for the build the launcher is about to start.
+    /// </summary>
+    [JsonPropertyName("LastVanillaVersion")]
+    public string? LastVanillaVersion { get; set; }
+
+    [JsonPropertyName("LastRepentogonVersion")]
+    public string? LastRepentogonVersion { get; set; }
+
+    /// <summary>
+    /// What to do with the live saves when the game exits: <c>Off</c>,
+    /// <c>Ask</c> or <c>Automatic</c>. Null means Ask.
+    /// </summary>
+    [JsonPropertyName("ExitCapture")]
+    public string? ExitCapture { get; set; }
+
+    /// <summary>Whether each screen shows its orientation card at the top. Null means yes.</summary>
+    [JsonPropertyName("ShowGuides")]
+    public bool? ShowGuides { get; set; }
+
+    // --- Save sync between your own machines --------------------------------
+    // A lane store: each device writes only its own lane and the app
+    // reconciles. Off by default; a Steam-owned copy has Cloud for this.
+
+    /// <summary><c>Off</c>, <c>Folder</c> or <c>Cloud</c>. Null means Off.</summary>
+    [JsonPropertyName("SaveSyncMode")]
+    public string? SaveSyncMode { get; set; }
+
+    /// <summary>Lane root for the Folder mode. Null means <c>&lt;SyncRoot&gt;\.savesync</c>.</summary>
+    [JsonPropertyName("SaveSyncFolder")]
+    public string? SaveSyncFolder { get; set; }
+
+    /// <summary>The Worker's address for the Cloud mode, e.g. <c>https://ipm-saves.example.workers.dev</c>.</summary>
+    [JsonPropertyName("SaveSyncEndpoint")]
+    public string? SaveSyncEndpoint { get; set; }
+
+    /// <summary>Bearer token and namespace for the Cloud mode. Generated on the first device, pasted on the others.</summary>
+    [JsonPropertyName("SaveSyncKey")]
+    public string? SaveSyncKey { get; set; }
+
+    /// <summary>Pull a newer revision before launch and push after exit capture without asking. Null means ask.</summary>
+    [JsonPropertyName("SaveSyncAutomatic")]
+    public bool? SaveSyncAutomatic { get; set; }
+
     /// <summary>Anything written by another version or by the PowerShell script. Preserved verbatim on write.</summary>
     [JsonExtensionData]
     public Dictionary<string, object?> Extra { get; set; } = new();

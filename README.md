@@ -89,30 +89,34 @@ Three things it is careful about:
 The unsubscribe runs even if something fails partway, because an account left
 subscribed is exactly the state that starts re-laying mods into your profiles.
 
-### Send someone your whole mod set as one string
+### Send someone your whole mod set
 
-Sharing a modpack used to mean sending a folder. Now it is a **share code**: one
-string holding every mod's Workshop id, its library name, and its hash.
+Sharing a modpack used to mean sending a folder. Now you send a small record of
+every mod's Workshop id, its library name, and its hash — and the other person's
+copy of the app rebuilds the set from Steam.
 
-Whoever you send it to pastes it into **Import a code...**, sees exactly what
-will happen before committing, and the app downloads the whole set — subscribing
-to only the mods they are missing, taking the files, and unsubscribing again. It
-then builds the profile and checks every mod against your hashes, so you both
-know you match byte for byte.
+Whoever you send it to opens **Import...**, sees exactly what will happen before
+committing, and the app downloads the whole set — subscribing to only the mods
+they are missing, taking the files, and unsubscribing again. It then builds the
+profile and checks every mod against your hashes, so you both know you match
+byte for byte.
 
 Mods they already have with a matching hash are skipped, so a second person
 joining a group only downloads the difference.
 
-It is not a short code, and it cannot be. A Workshop id is essentially a random
-34-bit number and a hash is incompressible, so a 40-mod set lands around 3.5 KB.
-Send it as a message or a file rather than reading it out. **Import also accepts
-a Steam collection id**, which is ten digits — short, browsable, and handy for
-grabbing a public modpack, but a collection cannot carry hashes, so it can tell
-you which mods to get and not whether you match.
+**Import also accepts a Steam collection id**, which is ten digits — short,
+browsable, and handy for grabbing a public modpack, but a collection cannot
+carry hashes, so it can tell you which mods to get and not whether you match.
 
-Anything that is not a Workshop item — a hand-installed mod — travels in the code
-as a name so the recipient is told about it, but nothing can download it for
-them. The app says so plainly at both ends.
+Anything that is not a Workshop item — a hand-installed mod — travels as a name
+so the recipient is told about it, but nothing can download it for them. The app
+says so plainly at both ends.
+
+> **Changing soon.** Today this is a **share code**: a long string you paste,
+> around 3.5 KB for a 40-mod set, because the ids and hashes *are* the payload.
+> It is being replaced by a short link and a file, both sent from the app. A
+> Steam collection id is only short because Steam stores the list — so the app
+> will store the list too. See [`docs/multi-device.md`](docs/multi-device.md).
 
 ### Setting up from someone else's profile
 
@@ -124,6 +128,11 @@ the Workshop and builds the profile for you.
 The same import lives on **Mod profiles → Import...** afterwards. It takes a
 share code, a Steam collection id, or a profile file, and it shows you exactly
 what it will do before it does any of it.
+
+Setting up a **second machine of your own** — a laptop — is a different job, and
+one the app does not yet make easy: you can sync the profiles folder and point a
+fresh install at it, but nothing recognises that the folder already has
+everything in it. That is [planned](docs/multi-device.md).
 
 ### Prove you and your friends match
 
@@ -148,6 +157,71 @@ REPENTOGON-era save loaded on retail can destroy every achievement. Your current
 saves are backed up before every swap, timestamped to the second.
 
 ![Save sets](docs/screenshots/saves.png)
+
+A set carries **the whole of what the game reads for a slot**, not just the
+save file: each mod's own per-slot data from the game's `data\` folder, and
+REPENTOGON's modded achievement and completion-mark state. Restoring unlocks
+without the mod state produced alongside them is a mismatch, and until 2.0 no
+save tool carried it.
+
+Every capture files the previous revision into the set's **history** first, so
+re-capturing is never a way to lose something. Restore any revision from the
+Saves screen.
+
+The Saves screen also **reads the save files**: achievements unlocked, items
+touched, challenges done, bosses killed and the game's own save counter, per
+slot, for every set and for what is live. Pick another set under *Compare
+unlocks with* and it says what each has that the other lacks. **Import a save
+file into a slot** takes a downloaded fully-unlocked save, a friend's file or
+one of REPENTOGON's daily backups, checks it is really a save, and files it
+into a set. **Export as a file** writes the whole set as one `.ipmsave`, which
+imports on another machine as a new set, gates and all.
+
+### Play: what happens when you press Launch
+
+The first screen resolves the four things a launch depends on **from disk** —
+the mods link, the live save files hashed against every set, the launcher's
+ini, and the last log's game version — and runs them through a guard:
+
+- A save from the **wrong build**, or a **different game version** than this
+  machine last ran, **blocks** the button.
+- A save made with a **different mod profile** than the one active is a
+  recommendation, with a *Switch and launch* button beside it.
+- Anything else is a note.
+
+**Play a save set** does the whole thing from the other end: pick a set, and
+the app loads it, activates the mod profile it was made with, points the
+launcher at its build, and starts the game.
+
+**When the game closes**, the app re-hashes the live saves and offers to
+capture the run you just played into the set that was live. Set it to
+*Automatic* and progress stops being stranded in the live folder. It only
+fires while the app is open, which is where you launched from anyway.
+
+Every screen opens with a short card saying what it is for and where things
+are. *Hide tips* removes them all at once; Settings brings them back.
+
+### Saves that follow you between your own machines
+
+For a copy Steam Cloud does not cover. Each machine writes only its own
+**lane**; the app compares revisions with a vector clock and pulls or pushes.
+Two machines that both played from the same point are a **fork**, shown with
+both revisions kept, never merged.
+
+Two places a lane can live, chosen in Settings:
+
+- **A folder you already sync** — Syncthing, OneDrive, a network share. The
+  default is `.savesync` inside your profiles root.
+- **Cloud** — a small Cloudflare Worker over an R2 bucket that you deploy under
+  your own account in two commands (`cloud/save-sync-worker/README.md`). It
+  runs on a free `workers.dev` address, needs no domain, and the address is
+  just a setting. A **sync key** generated on one machine and pasted on the
+  others is both the password and the namespace, so one Worker can serve a
+  whole friend group without anyone seeing anyone else's saves.
+
+With **Automatic** on, the Play screen pulls a newer revision before you press
+Launch and pushes after the game closes and the run is captured. Switching
+machines is then: close the game on one, open the app on the other, launch.
 
 ### Read the log without opening a 200 KB text file
 
@@ -253,6 +327,19 @@ already have the library, that's all they need.
 
 Then have them **Compare** against your export before you play. It takes a
 second and it settles the argument.
+
+**Coming next** — [`docs/multi-device.md`](docs/multi-device.md) is the working
+plan for the next block of work:
+
+- Your laptop set up from the synced folder in one screen, instead of a fresh
+  install that ignores everything already there
+- Save sets that follow you between your own machines, with forks surfaced
+  rather than silently resolved
+- The run you just played captured when you close the game, instead of stranded
+  in the live folder
+- A save set that requires the build it was made with and recommends the mod
+  profile, at the moment you press Launch
+- Share and import from the app by link or file, with the share code retired
 
 ---
 

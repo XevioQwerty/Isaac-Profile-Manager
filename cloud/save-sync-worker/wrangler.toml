@@ -1,0 +1,11 @@
+name = "ipm-save-sync"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# The bucket is created by `npm run setup` (wrangler r2 bucket create ipm-saves).
+[[r2_buckets]]
+binding = "SAVES"
+bucket_name = "ipm-saves"
+
+[vars]
+MAX_PACK_BYTES = "8388608"

@@ -175,6 +175,155 @@ public sealed class SettingsViewModel : ObservableObject
     public RelayCommand StartLauncherCommand { get; }
 
     public string ConfigPath => _shell.Store.ConfigPath ?? "(not found)";
+
+    // --- Save sync between your own machines --------------------------------
+
+    public string SyncMode
+    {
+        get => _shell.SaveSyncMode;
+        set
+        {
+            var config = _shell.Config;
+            if (config is null) return;
+            config.SaveSyncMode = value;
+            _shell.SaveConfig();
+            RaiseSync();
+        }
+    }
+
+    public bool SyncIsFolder => SyncMode == MainViewModel.SyncFolder;
+    public bool SyncIsCloud => SyncMode == MainViewModel.SyncCloud;
+
+    public string SyncFolder
+    {
+        get => _shell.Config?.SaveSyncFolder ?? _shell.DefaultSaveSyncFolder;
+        set
+        {
+            var config = _shell.Config;
+            if (config is null) return;
+            config.SaveSyncFolder = string.IsNullOrWhiteSpace(value) || value == _shell.DefaultSaveSyncFolder ? null : value.Trim();
+            _shell.SaveConfig();
+            OnPropertyChanged();
+        }
+    }
+
+    public string SyncEndpoint
+    {
+        get => _shell.Config?.SaveSyncEndpoint ?? string.Empty;
+        set
+        {
+            var config = _shell.Config;
+            if (config is null) return;
+            config.SaveSyncEndpoint = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            _shell.SaveConfig();
+            OnPropertyChanged();
+        }
+    }
+
+    public string SyncKey
+    {
+        get => _shell.Config?.SaveSyncKey ?? string.Empty;
+        set
+        {
+            var config = _shell.Config;
+            if (config is null) return;
+            config.SaveSyncKey = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            _shell.SaveConfig();
+            OnPropertyChanged();
+        }
+    }
+
+    public bool SyncAutomatic
+    {
+        get => _shell.SaveSyncAutomatic;
+        set
+        {
+            var config = _shell.Config;
+            if (config is null) return;
+            config.SaveSyncAutomatic = value;
+            _shell.SaveConfig();
+            OnPropertyChanged();
+        }
+    }
+
+    private string _syncTestText = string.Empty;
+
+    public string SyncTestText
+    {
+        get => _syncTestText;
+        private set => SetField(ref _syncTestText, value);
+    }
+
+    /// <summary>A fresh key: 32 random bytes, URL-safe. The Worker hashes it into the namespace; the key itself never leaves the two machines.</summary>
+    public RelayCommand GenerateSyncKeyCommand => new(() =>
+    {
+        if (SyncKey.Length > 0 && System.Windows.MessageBox.Show(
+                "Replace the current sync key? Every other machine will need the new one, and lanes pushed under the old key become unreachable from here.",
+                "New sync key", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning) != System.Windows.MessageBoxResult.Yes)
+            return;
+
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        SyncKey = Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        _shell.Report("Generated a sync key. Copy it to your other machine.");
+    }, () => _shell.Config is not null);
+
+    public RelayCommand CopySyncKeyCommand => new(() =>
+    {
+        try { System.Windows.Clipboard.SetText(SyncKey); _shell.Report("Sync key copied."); }
+        catch (Exception ex) { _shell.Report(ex.Message); }
+    }, () => SyncKey.Length > 0);
+
+    public RelayCommand BrowseSyncFolderCommand => new(() =>
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Folder your sync client carries between machines" };
+        if (dialog.ShowDialog() == true) SyncFolder = dialog.FolderName;
+    }, () => _shell.Config is not null);
+
+    public RelayCommand TestSyncCommand => new(() => _ = TestSyncAsync(), () => _shell.SaveSyncEnabled);
+
+    private async Task TestSyncAsync()
+    {
+        SyncTestText = "checking…";
+        try
+        {
+            var service = _shell.CreateSaveSyncService();
+            if (service is null) { SyncTestText = "Sync is off."; return; }
+            var statuses = await Task.Run(() => service.StatusAsync());
+            var remote = statuses.Count(s => s.Newest is not null);
+            SyncTestText = $"OK — {service.Store.Description}: {remote} set(s) with a lane, " +
+                           $"{statuses.Count(s => s.NeedsPush)} to push, {statuses.Count(s => s.CanPull)} to pull.";
+        }
+        catch (Exception ex) when (ex is Core.Services.SaveSyncException or IOException or UnauthorizedAccessException)
+        {
+            SyncTestText = ex.Message;
+        }
+    }
+
+    private void RaiseSync()
+    {
+        foreach (var name in new[] { nameof(SyncMode), nameof(SyncIsFolder), nameof(SyncIsCloud), nameof(SyncFolder),
+                                     nameof(SyncEndpoint), nameof(SyncKey), nameof(SyncAutomatic) })
+            OnPropertyChanged(name);
+    }
+
+    /// <summary>The orientation cards at the top of each screen. Lives on the shell; this is the checkbox.</summary>
+    public bool ShowGuides
+    {
+        get => _shell.ShowGuides;
+        set { _shell.ShowGuides = value; OnPropertyChanged(); }
+    }
+
+    /// <summary>The shell changed it (the Hide tips link); the checkbox must follow or it shows a stale tick.</summary>
+    public void RaiseShowGuides()
+    {
+        OnPropertyChanged(nameof(ShowGuides));
+        RaiseSync();
+    }
+
+    /// <summary>How this machine is named in the save sets it captures.</summary>
+    public string DeviceText => _shell.Config is { DeviceId: { Length: > 0 } id, DeviceName: var name }
+        ? $"This device: {name ?? "(unnamed)"}  ·  id {(id.Length > 8 ? id[..8] : id)}"
+        : string.Empty;
     public string GameDir => _shell.Config?.GameDir ?? string.Empty;
     public string ModsDir => _shell.Config?.ModsDir ?? string.Empty;
     public string SyncRoot => _shell.Config?.SyncRoot ?? string.Empty;

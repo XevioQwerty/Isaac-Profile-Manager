@@ -62,6 +62,24 @@ public sealed class LogReaderService : ILogReaderService
     private static readonly Regex VersionPattern = new(@"Game Version:\s*(\S+)", RegexOptions.Compiled);
     private static readonly Regex ModPattern = new(@"LOADED MOD\s+(.+?)/?\s*$", RegexOptions.Compiled);
 
+    /// <summary>
+    /// The game says where it saves, every launch:
+    /// <c>Loading PersistentGameData from Steam Cloud: rep+persistentgamedata1.dat.</c>
+    /// Verified 2026-09-03 across 40 archived logs; every one said Steam Cloud.
+    /// </summary>
+    private static readonly Regex SaveTransportPattern = new(@"PersistentGameData (?:from|to) (.+?):\s", RegexOptions.Compiled);
+
+    /// <summary>What the log says the saves are read from and written to, or null when it never said.</summary>
+    public static string? SaveTransport(IReadOnlyList<LogLine> lines)
+    {
+        foreach (var line in lines)
+        {
+            var match = SaveTransportPattern.Match(line.Text);
+            if (match.Success) return match.Groups[1].Value.Trim();
+        }
+        return null;
+    }
+
     public string LogPath { get; }
 
     public LogReaderService(string? logPath = null)
@@ -76,6 +94,69 @@ public sealed class LogReaderService : ILogReaderService
     public bool Exists => File.Exists(LogPath);
 
     public DateTime? LastWritten => Exists ? File.GetLastWriteTime(LogPath) : null;
+
+    /// <summary>
+    /// Just the <c>Game Version:</c> line, without reading the whole log. It is
+    /// within the first hundred lines on every log seen; the cap is a guard
+    /// against a log with no such line, not a tuning knob.
+    /// </summary>
+    public string? ReadGameVersion(int maxLines = 400) => ReadGameVersion(LogPath, maxLines);
+
+    public static string? ReadGameVersion(string logPath, int maxLines = 400) => ReadRun(logPath, maxLines).GameVersion;
+
+    /// <summary>
+    /// Which build wrote the log, from its command line: REPENTOGON's launcher
+    /// runs <c>Repentogon\isaac-ng.exe</c>, and a vanilla launch through it
+    /// carries <c>--repentogonoff</c>. A plain launch has neither and is
+    /// vanilla. Verified 2026-09-04 against both kinds of log.
+    /// </summary>
+    public sealed record LogRun(string? GameVersion, Models.GameBuild Build)
+    {
+        public static readonly LogRun None = new(null, Models.GameBuild.Unknown);
+    }
+
+    /// <summary>
+    /// The version and the build of the run that wrote the log. The version
+    /// belongs to that build, not to the machine: after a REPENTOGON session
+    /// the log says J273, and that says nothing about what a vanilla launch
+    /// will run.
+    /// </summary>
+    public LogRun ReadRun(int maxLines = 400) => ReadRun(LogPath, maxLines);
+
+    public static LogRun ReadRun(string logPath, int maxLines = 400)
+    {
+        if (!File.Exists(logPath)) return LogRun.None;
+
+        using var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read,
+                                          FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+
+        string? version = null;
+        var build = Models.GameBuild.Unknown;
+        string? raw;
+        var number = 0;
+        while ((raw = reader.ReadLine()) is not null && number++ < maxLines)
+        {
+            if (version is null)
+            {
+                var match = VersionPattern.Match(raw);
+                if (match.Success) version = match.Groups[1].Value;
+            }
+
+            if (raw.Contains("--repentogonoff", StringComparison.OrdinalIgnoreCase))
+                build = Models.GameBuild.Vanilla;
+            else if (build == Models.GameBuild.Unknown &&
+                     raw.Contains("isaac-ng.exe", StringComparison.OrdinalIgnoreCase))
+                build = raw.Replace('/', '\\').Contains("\\Repentogon\\isaac-ng.exe", StringComparison.OrdinalIgnoreCase)
+                    ? Models.GameBuild.Repentogon
+                    : Models.GameBuild.Vanilla;
+
+            if (version is not null && build != Models.GameBuild.Unknown) break;
+        }
+
+        if (version is not null && build == Models.GameBuild.Unknown) build = Models.GameBuild.Vanilla;
+        return new LogRun(version, build);
+    }
 
     public IReadOnlyList<LogLine> Read(int maxLines = 200_000)
     {

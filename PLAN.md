@@ -61,6 +61,62 @@ Two conventions from step 19:
 
 Still not built: live log tail via `FileSystemWatcher`.
 
+## 2.5.0
+
+Version 2.5.0 is "complete save state first": a save set now describes the
+whole of what the game reads for a slot, the app knows which set is live, and
+Launch runs a guard. Save sync between your own machines shipped in it too,
+over a folder or a Worker; the share link stays designed and unbuilt. The UI
+moved from seven tabs to a rail with Play first.
+
+| Step | State |
+|---|---|
+| 20a. Per-set history on every capture (`.history\`), retention | **Done** |
+| 20b. Device id, vector clock, `GameVersion` stamped on capture | **Done** |
+| 20c. Mod data and REPENTOGON state carried with a set (`SlotStateCarrier`) | **Done** — capture, backup, restore, drift; 1.x sets never touch live mod data |
+| 20d. `SaveIdentityService` — which set is live, by hashing | **Done** |
+| 20e. `LaunchGuardService` + Play screen + save-set-led launch | **Done** |
+| 20f. `GameSessionWatcher` + exit capture (Off · Ask · Automatic) | **Done** — default Ask; fires only while the app is open |
+| 20g. Rail shell: Play · Mods · Saves · Game · Diagnose · Settings | **Done** |
+| 20h. The probes: REPENTOGON sync on mismatch, Steam-closed launch, second machine's account | **Run 2026-09-04** — answers in `CLAUDE.md`; the shared-save question remains |
+| 20k. Save viewer, compare unlocks, import a `.dat` into a slot, `.ipmsave` export/import | **Done** — `SaveFileParser`, packs in `SaveSetService` |
+| 20l. Guide cards on every screen, labelled Library menus, first-time build setup retired | **Done** |
+| 20i. Lanes: `ISaveLaneStore` over a folder and over a Worker + R2, `SaveSyncService`, Play pull-before-launch and push-after-exit, Saves sync card, Settings | **Done** — Worker in `cloud/save-sync-worker`, deployed 2026-09-04 |
+| 20j. Adopt-a-synced-SyncRoot setup path | Designed, not started |
+| 21. Sharing by link; share code removed | Designed, not started |
+
+Conventions from 2.0:
+
+- **Additive schemas, again.** `SaveSet` stayed at schema 1 and `AppConfig` at
+  `ConfigVersion 3`. A 1.x build reads a 2.0 set and ignores the new keys; a
+  2.0 build reads a 1.x set and treats `ModDataCaptured = false` as "never
+  looked", which is the flag that stops activation clearing live mod data on a
+  set that never carried any. Both models preserve unknown keys.
+- **A set folder has subfolders now** — `moddata\`, `repentogon\`, `.history\`.
+  Activation copies only the files in the folder root into the live folder, so
+  a 1.x activation of a 2.0 set is still correct, just incomplete.
+- **The shell watches the game process.** `GameSessionWatcher` polls every two
+  seconds; the Play screen waits three more after exit for the save to settle
+  before hashing. Events arrive on a pool thread and are marshalled to the UI.
+- **One place builds the save service.** `MainViewModel.CreateSaveSetService`
+  supplies the device id, REPENTOGON's folder and the version reader, so the
+  Saves and Play screens cannot disagree about what a set carries.
+
+Both are specified in [`docs/multi-device.md`](docs/multi-device.md), which is
+the working document for them and carries the build order, the probes to run
+first, and the test list. Two things it changes in this file:
+
+- It **supersedes the "`.saves` must not sync" line** in the Saves blueprint
+  below. That line is still right about `.saves\` itself; what travels between
+  your own machines is a separate `.savesync\<device-id>\` lane folder that no
+  two devices ever write to at once.
+- It **removes `ShareCodeService`**. The measurement that killed it stays in
+  `CLAUDE.md`, because it is the reason a link is the right shape — a Steam
+  collection id is short only because Steam stores the list, so store the list.
+
+`docs/multi-device.md` also carries a **Beyond the plan** section: UI shape and
+feature ideas that came out of this work and are not committed to.
+
 Built and verified against a real install: `dotnet test` is green (53 tests), and
 the app reads the live junction rather than trusting the config.
 
@@ -445,8 +501,17 @@ class SaveSet {
 ```
 
 `.saves` is **machine-local and must not sync** — save state is personal, and
-sharing it is the unlock-state desync this whole project exists to prevent. It
-goes in `.stignore` alongside `.backup` and the materialised profile folders.
+sharing it *accidentally* is the unlock-state desync this whole project exists
+to prevent. It goes in `.stignore` alongside `.backup` and the materialised
+profile folders.
+
+> **Amended by step 20.** That still holds for `.saves\`. Getting a save onto
+> your *own* second machine is a different question, and the answer is a
+> separate `.savesync\<device-id>\` folder that does sync: each device writes
+> only its own lane, so the sync client can never produce a conflict, and the
+> app reconciles lanes into `.saves\` where it can check Isaac is closed first.
+> Deliberate sharing with a person is a third case again — an explicit,
+> warned export. See [`docs/multi-device.md`](docs/multi-device.md).
 
 ### Safety rules, in order of enforcement
 

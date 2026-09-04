@@ -155,6 +155,30 @@ if ($Live) {
             ((Get-Date) - $started).TotalSeconds -lt 90
         }
     }
+
+    # --- The save-sync Worker, if one is configured ---------------------
+    # Uses a throwaway key and set name, and deletes its own lane after.
+    Step 'Save sync endpoint (throwaway lane)'
+    $endpoint = $config.SaveSyncEndpoint
+
+    if (-not $endpoint) {
+        Write-Host '  skip  no SaveSyncEndpoint in the config' -ForegroundColor Yellow
+    } else {
+        Check 'Worker answers ping' {
+            (Invoke-RestMethod -Uri "$endpoint/v1/ping").ok -eq $true
+        }
+
+        Check 'push, list, pull, delete round trip through the real client' {
+            $env:IPM_SYNC_ENDPOINT = $endpoint
+            try {
+                dotnet test "$root\tests\IsaacProfileManager.Tests\IsaacProfileManager.Tests.csproj" --nologo -v quiet --no-build `
+                    --filter 'FullyQualifiedName~SaveSyncLiveTests' | Out-Null
+                $LASTEXITCODE -eq 0
+            } finally {
+                Remove-Item Env:IPM_SYNC_ENDPOINT -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
 
 if ($Install) {

@@ -1,8 +1,12 @@
 <UserControl x:Class="IsaacProfileManager.Views.SavesView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:views="clr-namespace:IsaacProfileManager.Views">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,14,0,10">
+        <StackPanel>
+            <views:GuideCard Title="A save set is your slots plus the mod data behind them"
+                         Text="Capture what is live, start a fresh one, or load a set. Every re-capture files the previous revision under History. Import a save file to put a downloaded save into a slot; export a set as one file to move it to another machine."/>
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="360"/>
@@ -54,6 +58,42 @@
                                    Text="Capture copies the live files into the set and changes nothing - safe whatever Steam Cloud is doing."/>
                         <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap"
                                    Text="Start a fresh save backs up the live files and clears them, so Isaac writes a new save next launch. The set stays empty until you come back and capture it."/>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="Bring a set in" Style="{StaticResource Heading}"/>
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="A set exported from another machine, or from someone you play with, arrives as one .ipmsave file. It is added to the list; the live saves do not change until you load it, and every check runs then."/>
+                        <Button Content="Import a .ipmsave file..." Command="{Binding ImportPackCommand}" HorizontalAlignment="Left"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Lanes on the other machine, per set -->
+                <Border Style="{StaticResource Card}" Visibility="{Binding HasSync, Converter={StaticResource BoolToVisible}}">
+                    <StackPanel>
+                        <TextBlock Text="Sync between your machines" Style="{StaticResource Heading}"/>
+                        <TextBlock Text="{Binding SyncSummary}" Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <ItemsControl ItemsSource="{Binding SyncStatuses}" Margin="0,0,0,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,0,0,4">
+                                        <TextBlock Text="{Binding SetName}" FontWeight="SemiBold"/>
+                                        <TextBlock Text="{Binding Text}" Style="{StaticResource Dim}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <WrapPanel>
+                            <Button Content="Check" Command="{Binding CheckSyncCommand}" Margin="0,0,8,8"/>
+                            <Button Content="Push selected" Command="{Binding PushSelectedCommand}" Margin="0,0,8,8"
+                                    ToolTip="Send the selected set's current revision to your other machine."/>
+                            <Button Content="Pull selected" Command="{Binding PullSelectedCommand}" Margin="0,0,8,8"
+                                    ToolTip="Take the newer revision from the other machine. A fork comes in as a separate set."/>
+                        </WrapPanel>
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap"
+                                   Text="Set up under Settings. The Play screen does the same for the set that is live, and does it by itself in Automatic mode."/>
                     </StackPanel>
                 </Border>
 
@@ -150,6 +190,19 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+
+                        <TextBlock Text="What they hold" Style="{StaticResource Dim}" Margin="0,8,0,2"
+                                   Visibility="{Binding HasLiveSlots, Converter={StaticResource BoolToVisible}}"/>
+                        <ItemsControl ItemsSource="{Binding LiveSlots}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,1">
+                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" MinWidth="160"/>
+                                        <TextBlock Text="{Binding Summary.Summary}" Style="{StaticResource Dim}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </Border>
 
@@ -185,7 +238,40 @@
                                    Visibility="{Binding Selected.Notes, Converter={StaticResource StringToVisible}}"/>
 
                         <TextBlock Text="Files" Style="{StaticResource Dim}"/>
-                        <TextBlock Text="{Binding Selected.FilesText}" Style="{StaticResource Mono}" Margin="0,0,0,10"/>
+                        <TextBlock Text="{Binding Selected.FilesText}" Style="{StaticResource Mono}" Margin="0,0,0,6"/>
+
+                        <TextBlock Text="{Binding Selected.CarriedText}" Style="{StaticResource Dim}" Margin="0,0,0,4"
+                                   Visibility="{Binding Selected.CarriedText, Converter={StaticResource StringToVisible}}"/>
+                        <TextBlock Text="{Binding Selected.RevisionText}" Style="{StaticResource Dim}" Margin="0,0,0,10"
+                                   Visibility="{Binding Selected.RevisionText, Converter={StaticResource StringToVisible}}"/>
+
+                        <!-- The unlock files parsed: evidence of what the set holds -->
+                        <TextBlock Text="What is in it" Style="{StaticResource Dim}" Margin="0,0,0,2"
+                                   Visibility="{Binding HasSetSlots, Converter={StaticResource BoolToVisible}}"/>
+                        <ItemsControl ItemsSource="{Binding SetSlots}" Margin="0,0,0,8">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,1">
+                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" MinWidth="160"/>
+                                        <TextBlock Text="{Binding Summary.Summary}" Style="{StaticResource Dim}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4"
+                                    Visibility="{Binding HasCompareChoices, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock Text="Compare unlocks with" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <ComboBox ItemsSource="{Binding CompareChoices}" SelectedItem="{Binding CompareWith}" MinWidth="200"/>
+                        </StackPanel>
+                        <TextBlock Text="{Binding CompareText}" Style="{StaticResource Mono}" Margin="0,0,0,10"
+                                   Visibility="{Binding CompareText, Converter={StaticResource StringToVisible}}"/>
+
+                        <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
+                                CornerRadius="4" Padding="10" Margin="0,0,0,10"
+                                Visibility="{Binding Selected.HasCarriedDrift, Converter={StaticResource BoolToVisible}}">
+                            <TextBlock Text="{Binding Selected.CarriedDriftText}"/>
+                        </Border>
 
                         <!-- Progress made since capture -->
                         <Border Background="#2A2519" BorderBrush="{StaticResource WarnBrush}" BorderThickness="1"
@@ -219,12 +305,34 @@
                         <StackPanel Orientation="Horizontal">
                             <Button Content="Load this save set" Style="{StaticResource PrimaryButton}"
                                     Command="{Binding ActivateCommand}" Margin="0,0,8,0"/>
-                            <Button Content="Re-capture into this set" Command="{Binding CaptureIntoCommand}"
+                            <Button Content="Re-capture into this set" Command="{Binding CaptureIntoCommand}" Margin="0,0,8,0"
                                     ToolTip="Replace this set's files with whatever is live now."/>
+                            <Button Content="Import a save file into a slot..." Command="{Binding ImportSaveFileCommand}" Margin="0,0,8,0"
+                                    ToolTip="A downloaded fully-unlocked save, a friend's file, or one from REPENTOGON's save_backups. Checked as a save first."/>
+                            <Button Content="Export as a file..." Command="{Binding ExportPackCommand}"
+                                    ToolTip="The whole set as one .ipmsave file, for another machine or another person."/>
                         </StackPanel>
 
                         <TextBlock Style="{StaticResource Dim}" Margin="0,10,0,0"
                                    Text="Your current saves are backed up first. A set from the wrong build is blocked rather than warned about — loading a REPENTOGON-era save on retail can destroy every achievement."/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Earlier revisions of the selected set -->
+                <Border Style="{StaticResource Card}"
+                        Visibility="{Binding HasSelection, Converter={StaticResource BoolToVisible}}">
+                    <StackPanel>
+                        <TextBlock Text="History" Style="{StaticResource Heading}"/>
+                        <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="Every capture files the previous revision here first. Restoring one makes it the set's current contents; what is current now is filed too, so nothing is ever lost."/>
+                        <TextBlock Style="{StaticResource Dim}" Margin="0,0,0,8"
+                                   Visibility="{Binding HasHistory, Converter={StaticResource BoolToCollapsed}}"
+                                   Text="No earlier revisions yet. The first re-capture into this set creates one."/>
+                        <ListBox ItemsSource="{Binding History}" SelectedItem="{Binding SelectedHistory}"
+                                 DisplayMemberPath="Label" MaxHeight="150" Margin="0,0,0,10"
+                                 Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisible}}"/>
+                        <Button Content="Restore this revision" Command="{Binding RestoreHistoryCommand}" HorizontalAlignment="Left"
+                                Visibility="{Binding HasHistory, Converter={StaticResource BoolToVisible}}"/>
                     </StackPanel>
                 </Border>
 
@@ -289,5 +397,6 @@
                 </Border>
             </StackPanel>
         </Grid>
+        </StackPanel>
     </ScrollViewer>
 </UserControl>

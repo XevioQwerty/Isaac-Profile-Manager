@@ -1,0 +1,36 @@
+<UserControl x:Class="IsaacProfileManager.Views.GuideCard"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root">
+
+    <!--
+        A short orientation at the top of a screen: what this screen is for,
+        and where the things you are likely to want live. Every card hides
+        together from the "Hide tips" link, and Settings brings them back.
+    -->
+    <Border Style="{StaticResource Card}" Background="{StaticResource PanelAlt}" Padding="12,10"
+            Visibility="{Binding DataContext.ShowGuides, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource BoolToVisible}}">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource Accent}" CornerRadius="10" Width="20" Height="20"
+                    VerticalAlignment="Top" Margin="0,1,10,0">
+                <TextBlock Text="?" FontWeight="Bold" FontSize="12" Foreground="White"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="{Binding Title, ElementName=Root}" FontWeight="SemiBold"/>
+                <TextBlock Text="{Binding Text, ElementName=Root}" Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            </StackPanel>
+
+            <Button Grid.Column="2" Content="Hide tips" Padding="8,2" VerticalAlignment="Top" Margin="12,0,0,0"
+                    Command="{Binding DataContext.HideGuidesCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    ToolTip="Hides these on every screen. Settings turns them back on."/>
+        </Grid>
+    </Border>
+</UserControl>

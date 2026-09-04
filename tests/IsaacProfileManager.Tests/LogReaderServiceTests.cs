@@ -139,4 +139,52 @@ public class LogReaderServiceTests
         Assert.Equal("a bare line with no tag", lines[0].Text);
         Assert.Equal(LogSeverity.Info, lines[0].Severity);
     }
+
+    [Fact]
+    public void SaveTransport_ReadsWhereTheGameSaidItSaves()
+    {
+        using var temp = new TempDir();
+        var log = RealisticLog + "\n[INFO] - Loading PersistentGameData from Steam Cloud: rep+persistentgamedata1.dat.\n";
+        var lines = ServiceFor(temp, log).Read();
+
+        Assert.Equal("Steam Cloud", LogReaderService.SaveTransport(lines));
+        Assert.Null(LogReaderService.SaveTransport(ServiceFor(temp).Read()));
+    }
+
+    [Fact]
+    public void ReadGameVersion_StopsAtTheVersionLine_AndIsNullWithoutOne()
+    {
+        using var temp = new TempDir();
+        Assert.Equal("J460", ServiceFor(temp).ReadGameVersion());
+        Assert.Null(new LogReaderService(temp.File("empty.txt", "[INFO] - nothing here\n")).ReadGameVersion());
+        Assert.Null(new LogReaderService(temp.Combine("missing.txt")).ReadGameVersion());
+    }
+
+    [Fact]
+    public void ReadRun_TellsWhichBuildWroteTheLog()
+    {
+        using var temp = new TempDir();
+        var rgon = temp.File("rgon.txt", """
+            [INFO] - Command Line:
+            [INFO] - 	A:\Games\The Binding of Isaac Rebirth\Repentogon\isaac-ng.exe
+            [INFO] - 	--luaheapsize=1024M
+            [INFO] - Game Version: J273
+            """);
+        var vanilla = temp.File("vanilla.txt", """
+            [INFO] - Command Line:
+            [INFO] - 	A:\Games\The Binding of Isaac Rebirth\isaac-ng.exe
+            [INFO] - 	--repentogonoff
+            [INFO] - Game Version: J460
+            """);
+        var plain = temp.File("plain.txt", """
+            [INFO] - Command Line:
+            [INFO] - 	C:\Steam\isaac-ng.exe
+            [INFO] - Game Version: J460
+            """);
+
+        Assert.Equal(new LogReaderService.LogRun("J273", IsaacProfileManager.Core.Models.GameBuild.Repentogon), LogReaderService.ReadRun(rgon));
+        Assert.Equal(new LogReaderService.LogRun("J460", IsaacProfileManager.Core.Models.GameBuild.Vanilla), LogReaderService.ReadRun(vanilla));
+        Assert.Equal(new LogReaderService.LogRun("J460", IsaacProfileManager.Core.Models.GameBuild.Vanilla), LogReaderService.ReadRun(plain));
+        Assert.Equal(LogReaderService.LogRun.None, LogReaderService.ReadRun(temp.Combine("missing.txt")));
+    }
 }

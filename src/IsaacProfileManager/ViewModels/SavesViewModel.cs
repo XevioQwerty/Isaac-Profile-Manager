@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using IsaacProfileManager.Core.Models;
 using IsaacProfileManager.Core.Services;
+using IsaacProfileManager.Views;
 
 namespace IsaacProfileManager.ViewModels;
 
@@ -36,6 +37,50 @@ public sealed class SaveSetViewModel
     public string DriftText => HasDrift
         ? $"{Drift.Count} live file(s) differ from this set: {string.Join(", ", Drift)}"
         : string.Empty;
+
+    /// <summary>Mod data and REPENTOGON state that has changed since capture.</summary>
+    public IReadOnlyList<string> CarriedDrift { get; init; } = Array.Empty<string>();
+
+    public bool HasCarriedDrift => CarriedDrift.Count > 0;
+
+    public string CarriedDriftText => HasCarriedDrift
+        ? $"{CarriedDrift.Count} carried file(s) changed since capture: {string.Join(", ", CarriedDrift.Take(4))}{(CarriedDrift.Count > 4 ? ", …" : "")}"
+        : string.Empty;
+
+    /// <summary>What the set carries beyond the game's own save files, or why it carries nothing.</summary>
+    public string CarriedText
+    {
+        get
+        {
+            if (IsEmpty) return string.Empty;
+            if (!Set.ModDataCaptured && !Set.RepentogonStateCaptured)
+                return "Carries no mod data or REPENTOGON state — captured before 2.0. Re-capture to include them.";
+
+            var parts = new List<string>();
+            if (Set.ModDataCaptured)
+            {
+                var mods = Set.ModData.Keys.Select(k => k.Split('/')).Where(s => s.Length == 3).Select(s => s[1]).Distinct().Count();
+                parts.Add(mods == 0 ? "no mod data was present" : $"mod data for {mods} mod(s)");
+            }
+            if (Set.RepentogonStateCaptured)
+                parts.Add(Set.RepentogonState.Count == 0 ? "no REPENTOGON state was present" : "REPENTOGON achievement state");
+
+            return "Carries " + string.Join(" and ", parts) + ".";
+        }
+    }
+
+    public string RevisionText
+    {
+        get
+        {
+            var parts = new List<string>();
+            var revision = Core.Services.VectorClock.Revision(Set.Clock);
+            if (revision > 0) parts.Add($"revision {revision}");
+            if (Set.GameVersion is { Length: > 0 }) parts.Add($"game version {Set.GameVersion}");
+            if (Set.Device is { Length: > 0 }) parts.Add($"last captured on {(Set.Device.Length > 8 ? Set.Device[..8] : Set.Device)}");
+            return string.Join("  ·  ", parts);
+        }
+    }
 }
 
 /// <summary>
@@ -310,11 +355,357 @@ public sealed class SavesViewModel : ObservableObject
     public RelayCommand OpenSetsFolderCommand { get; }
     public RelayCommand OpenSteamPropertiesCommand { get; }
 
-    private SaveSetService? Service =>
-        string.IsNullOrWhiteSpace(_shell.Config?.SyncRoot)
-            ? null
-            : new SaveSetService(_shell.Process, new SteamCloudService(), _shell.Config!.SyncRoot!,
-                                 _shell.Config!.SaveFolder, _shell.Config!.GameDir);
+    private SaveSetService? Service => _shell.CreateSaveSetService();
+
+    /// <summary>
+    /// Remember which set the live saves are, so the Play screen's guard can
+    /// name a set that has drifted. Advisory: the hashes are the truth.
+    /// </summary>
+    private void RememberLive(string? setName)
+    {
+        var config = _shell.Config;
+        if (config is null) return;
+        config.ActiveSaveSet = setName;
+        _shell.SaveConfig();
+    }
+
+    // --- History ------------------------------------------------------------
+    // Every capture files the previous revision first. This is the undo for
+    // everything else on this screen.
+
+    public ObservableCollection<HistoryEntry> History { get; } = new();
+
+    private HistoryEntry? _selectedHistory;
+
+    public HistoryEntry? SelectedHistory
+    {
+        get => _selectedHistory;
+        set => SetField(ref _selectedHistory, value);
+    }
+
+    public bool HasHistory => History.Count > 0;
+
+    public RelayCommand RestoreHistoryCommand => new(RestoreHistory, () => Selected is not null && SelectedHistory is not null);
+
+    private void LoadHistory()
+    {
+        History.Clear();
+        var service = Service;
+        if (service is not null && Selected is not null)
+        {
+            foreach (var entry in service.ListHistory(Selected.Name)) History.Add(entry);
+        }
+        SelectedHistory = History.FirstOrDefault();
+        OnPropertyChanged(nameof(HasHistory));
+    }
+
+    private void RestoreHistory()
+    {
+        var service = Service;
+        if (service is null || Selected is null || SelectedHistory is null) return;
+
+        var set = Selected.Name;
+        var entry = SelectedHistory;
+        if (MessageBox.Show(
+                $"Make revision '{entry.Label}' the current contents of '{set}'?\n\n" +
+                "What the set holds now is filed into its history first, so nothing is lost. " +
+                "The live saves are not touched — load the set afterwards if you want to play it.",
+                "Restore revision", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+
+        Run(() =>
+        {
+            var restored = service.RestoreHistory(set, entry.Name);
+            _shell.Report($"'{restored.Name}' is now revision {Core.Services.VectorClock.Revision(restored.Clock)}, restored from {entry.Name}.");
+        });
+    }
+
+    // --- What is inside -------------------------------------------------------
+    // The unlock files parsed, so a set is evidence rather than a name:
+    // achievements, items touched, challenges, bosses, and the game's own save
+    // counter. Read-only; nothing here writes a save.
+
+    public ObservableCollection<SaveSetService.SlotDescription> SetSlots { get; } = new();
+    public ObservableCollection<SaveSetService.SlotDescription> LiveSlots { get; } = new();
+
+    public bool HasSetSlots => SetSlots.Count > 0;
+    public bool HasLiveSlots => LiveSlots.Count > 0;
+
+    private void LoadSlots()
+    {
+        SetSlots.Clear();
+        var service = Service;
+        if (service is not null && Selected is not null)
+        {
+            foreach (var slot in service.DescribeSet(Selected.Set)) SetSlots.Add(slot);
+        }
+        OnPropertyChanged(nameof(HasSetSlots));
+        RefreshCompareChoices();
+    }
+
+    // --- Compare two sets -------------------------------------------------------
+
+    public ObservableCollection<string> CompareChoices { get; } = new();
+
+    private string? _compareWith;
+
+    public string? CompareWith
+    {
+        get => _compareWith;
+        set { if (SetField(ref _compareWith, value)) OnPropertyChanged(nameof(CompareText)); }
+    }
+
+    public bool HasCompareChoices => CompareChoices.Count > 0;
+
+    private void RefreshCompareChoices()
+    {
+        CompareChoices.Clear();
+        foreach (var set in Sets)
+        {
+            if (Selected is null || !string.Equals(set.Name, Selected.Name, StringComparison.OrdinalIgnoreCase))
+                CompareChoices.Add(set.Name);
+        }
+        if (CompareWith is null || !CompareChoices.Contains(CompareWith)) CompareWith = CompareChoices.FirstOrDefault();
+        OnPropertyChanged(nameof(HasCompareChoices));
+        OnPropertyChanged(nameof(CompareText));
+    }
+
+    /// <summary>Per slot, what this set has unlocked that the other lacks and vice versa.</summary>
+    public string CompareText
+    {
+        get
+        {
+            var service = Service;
+            if (service is null || Selected is null || CompareWith is null || SetSlots.Count == 0) return string.Empty;
+
+            SaveSet? other;
+            try { other = service.LoadSet(CompareWith); }
+            catch (ConfigSchemaMismatchException) { return string.Empty; }
+            if (other is null) return string.Empty;
+
+            var theirs = service.DescribeSet(other);
+            var lines = new List<string>();
+            foreach (var mine in SetSlots)
+            {
+                var match = theirs.FirstOrDefault(t => t.Slot == mine.Slot && t.Build == mine.Build);
+                if (match is null) { lines.Add($"{mine.Label}: not in '{other.Name}'"); continue; }
+                if (!mine.Summary.Parsed || !match.Summary.Parsed) { lines.Add($"{mine.Label}: could not be read"); continue; }
+
+                var diff = SaveFileParser.Compare(mine.Summary, match.Summary);
+                if (diff.Identical)
+                {
+                    lines.Add($"{mine.Label}: same unlocks (save #{mine.Summary.Counter} vs #{match.Summary.Counter})");
+                    continue;
+                }
+
+                lines.Add($"{mine.Label}: achievements +{diff.AchievementsOnlyInFirst.Count}/-{diff.AchievementsOnlyInSecond.Count}, " +
+                          $"items +{diff.ItemsOnlyInFirst.Count}/-{diff.ItemsOnlyInSecond.Count}, " +
+                          $"challenges +{diff.ChallengesOnlyInFirst.Count}/-{diff.ChallengesOnlyInSecond.Count}   " +
+                          "(+ only here, - only there)");
+            }
+            return string.Join("\n", lines);
+        }
+    }
+
+    // --- Sync between your machines ---------------------------------------------
+
+    public bool HasSync => _shell.SaveSyncEnabled;
+
+    public ObservableCollection<SetSyncStatus> SyncStatuses { get; } = new();
+
+    private string _syncSummary = string.Empty;
+    private int _syncGeneration;
+
+    public string SyncSummary
+    {
+        get => _syncSummary;
+        private set => SetField(ref _syncSummary, value);
+    }
+
+    public SetSyncStatus? SelectedSync =>
+        Selected is null ? null : SyncStatuses.FirstOrDefault(s => string.Equals(s.SetName, Selected.Name, StringComparison.OrdinalIgnoreCase));
+
+    public RelayCommand CheckSyncCommand => new(() => _ = CheckSyncAsync(), () => HasSync);
+    public RelayCommand PushSelectedCommand => new(() => _ = PushSelectedAsync(), () => HasSync && Selected is { IsEmpty: false });
+    public RelayCommand PullSelectedCommand => new(() => _ = PullSelectedAsync(), () => HasSync && SelectedSync?.CanPull == true && !_shell.IsIsaacRunning);
+
+    private async Task CheckSyncAsync()
+    {
+        var generation = ++_syncGeneration;
+        SyncStatuses.Clear();
+        OnPropertyChanged(nameof(HasSync));
+        if (!HasSync) { SyncSummary = string.Empty; return; }
+
+        SaveSyncService? service;
+        try { service = _shell.CreateSaveSyncService(); }
+        catch (SaveSyncException ex) { SyncSummary = ex.Message; return; }
+        if (service is null) return;
+
+        SyncSummary = $"checking {service.Store.Description}…";
+        try
+        {
+            var statuses = await Task.Run(() => service.StatusAsync());
+            if (generation != _syncGeneration) return;
+            foreach (var status in statuses) SyncStatuses.Add(status);
+            SyncSummary = $"{service.Store.Description} — {statuses.Count(s => s.NeedsPush)} to push, {statuses.Count(s => s.CanPull)} to pull, " +
+                          $"{statuses.Count(s => s.Relation == SyncRelation.Fork)} forked.";
+        }
+        catch (Exception ex) when (ex is SaveSyncException or IOException or UnauthorizedAccessException)
+        {
+            if (generation == _syncGeneration) SyncSummary = ex.Message;
+        }
+        OnPropertyChanged(nameof(SelectedSync));
+    }
+
+    private async Task PushSelectedAsync()
+    {
+        var name = Selected?.Name;
+        if (name is null) return;
+        try
+        {
+            var service = _shell.CreateSaveSyncService();
+            if (service is null) return;
+            var manifest = await Task.Run(() => service.PushAsync(name));
+            _shell.Report($"Pushed '{name}' revision {manifest.Revision} to {service.Store.Description}.");
+        }
+        catch (Exception ex) when (ex is SaveSyncException or UnsafePathException or IOException)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Push", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        await CheckSyncAsync();
+    }
+
+    private async Task PullSelectedAsync()
+    {
+        var status = SelectedSync;
+        if (status?.Newest is null) return;
+        var asCopy = status.Relation == SyncRelation.Fork;
+
+        var question = asCopy
+            ? $"'{status.SetName}' was played here and on {status.Newest.DeviceName} from the same point. Bring the {status.Newest.DeviceName} revision in as a separate set so you can compare?"
+            : $"Pull '{status.SetName}' revision {status.RemoteRevision} from {status.Newest.DeviceName}? What is here is filed into history first. The live saves are not touched — load the set afterwards.";
+        if (MessageBox.Show(question, "Pull", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var service = _shell.CreateSaveSyncService();
+            if (service is null) return;
+            var pulled = await Task.Run(() => asCopy ? service.PullAsCopyAsync(status.SetName, status.Newest) : service.PullAsync(status.SetName, status.Newest));
+            _shell.Report($"Pulled '{pulled.Name}' (rev {VectorClock.Revision(pulled.Clock)}) from {status.Newest.DeviceName}.");
+        }
+        catch (Exception ex) when (ex is SaveSyncException or UnsafePathException or ConfigSchemaMismatchException or IOException)
+        {
+            _shell.Report(ex.Message);
+            MessageBox.Show(ex.Message, "Pull", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        var keep = _shell.StatusMessage;
+        _shell.Reload();
+        _shell.Report(keep);
+    }
+
+    // --- Files in and out -------------------------------------------------------
+
+    /// <summary>Put a save file from anywhere — a downloaded full save, a friend's — into a slot of the selected set.</summary>
+    public RelayCommand ImportSaveFileCommand => new(ImportSaveFile, () => Selected is not null);
+
+    /// <summary>The whole set as one file, for another machine.</summary>
+    public RelayCommand ExportPackCommand => new(ExportPack, () => Selected is not null);
+
+    public RelayCommand ImportPackCommand => new(ImportPack, () => Service is not null);
+
+    private void ImportSaveFile()
+    {
+        var service = Service;
+        if (service is null || Selected is null) return;
+        var set = Selected.Set;
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose a save file to put into a slot",
+            Filter = "Isaac save (*.dat)|*.dat|All files (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var slotText = TextPrompt.Ask("Which slot?", "1, 2 or 3 — the position on the game's save select screen.", "1");
+        if (slotText is null) return;
+        if (!int.TryParse(slotText.Trim(), out var slot) || slot is < 1 or > 3)
+        {
+            MessageBox.Show("Slots are 1, 2 or 3.", "Import save file", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var build = set.Build;
+        if (build is not (GameBuild.Vanilla or GameBuild.Repentogon))
+        {
+            var answer = MessageBox.Show("Is this a REPENTOGON save?\n\nYes: REPENTOGON (J273).\nNo: vanilla / retail.",
+                                         "Import save file", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (answer == MessageBoxResult.Cancel) return;
+            build = answer == MessageBoxResult.Yes ? GameBuild.Repentogon : GameBuild.Vanilla;
+        }
+
+        var target = SaveSetService.SaveFileNameFor(build, slot);
+        if (set.Files.Contains(target, StringComparer.OrdinalIgnoreCase) && MessageBox.Show(
+                $"'{set.Name}' already has {target}. Replace it? The current revision is filed into history first.",
+                "Import save file", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return;
+
+        Run(() =>
+        {
+            var updated = service.ImportSaveFile(set.Name, slot, dialog.FileName, build);
+            var described = updated is null ? null : service.DescribeSet(updated).FirstOrDefault(d => d.Slot == slot && d.Build == build);
+            _shell.Report($"Put {Path.GetFileName(dialog.FileName)} into slot {slot} of '{set.Name}'" +
+                          (described is null ? "." : $" — {described.Summary.Summary}."));
+        });
+    }
+
+    private void ExportPack()
+    {
+        var service = Service;
+        if (service is null || Selected is null) return;
+
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export the save set as one file",
+            FileName = Selected.Name + SaveSetService.PackExtension,
+            Filter = $"Isaac save set (*{SaveSetService.PackExtension})|*{SaveSetService.PackExtension}",
+            DefaultExt = SaveSetService.PackExtension,
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var name = Selected.Name;
+        Run(() =>
+        {
+            service.ExportPack(name, dialog.FileName);
+            _shell.Report($"Exported '{name}' to {Path.GetFileName(dialog.FileName)}. Import it on the other machine from the Saves screen.");
+        });
+    }
+
+    private void ImportPack()
+    {
+        var service = Service;
+        if (service is null) return;
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import a save set file",
+            Filter = $"Isaac save set (*{SaveSetService.PackExtension})|*{SaveSetService.PackExtension}|All files (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        var name = TextPrompt.Ask("Name for the imported set", "It is added as a new set; nothing live changes until you load it.",
+                                  Path.GetFileNameWithoutExtension(dialog.FileName));
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        Run(() =>
+        {
+            var imported = service.ImportPack(dialog.FileName, name.Trim());
+            _shell.Report($"Imported '{imported.Name}' — {imported.BuildText}, {imported.Files.Count} files, {imported.CarriedFileCount} carried. Load it from the list when you want to play it.");
+        });
+    }
 
     public SteamCloudStatus? Cloud { get; private set; }
     /// <summary>
@@ -333,6 +724,9 @@ public sealed class SavesViewModel : ObservableObject
         {
             if (!SetField(ref _selected, value)) return;
             LoadEditFields(value?.Set);
+            LoadHistory();
+            LoadSlots();
+            OnPropertyChanged(nameof(SelectedSync));
             OnPropertyChanged(nameof(HasSelection));
             RaiseGate();
         }
@@ -449,18 +843,28 @@ public sealed class SavesViewModel : ObservableObject
                 catch (ConfigSchemaMismatchException ex) { _shell.Report(ex.Message); continue; }
                 if (set is null) continue;
 
-                Sets.Add(new SaveSetViewModel { Set = set, Drift = service.DetectDrift(set) });
+                Sets.Add(new SaveSetViewModel
+                {
+                    Set = set,
+                    Drift = service.DetectDrift(set),
+                    CarriedDrift = service.DetectCarriedDrift(set),
+                });
             }
 
             foreach (var backup in service.ListBackups()) Backups.Add(backup);
             foreach (var file in service.ReadLive())
                 LiveFiles.Add($"{file.FileName}  ({file.Length:N0} bytes, {file.Modified:MM-dd HH:mm})");
+
+            LiveSlots.Clear();
+            foreach (var slot in service.DescribeLive()) LiveSlots.Add(slot);
+            OnPropertyChanged(nameof(HasLiveSlots));
         }
 
         Selected = Sets.FirstOrDefault(s => s.Name == previous) ?? Sets.FirstOrDefault();
         SelectedBackup = Backups.Contains(previousBackup ?? "") ? previousBackup : Backups.FirstOrDefault();
 
         RaiseGate();
+        _ = CheckSyncAsync();
     }
 
     private void RaiseGate()
@@ -495,7 +899,8 @@ public sealed class SavesViewModel : ObservableObject
         {
             var players = NewSetPlayers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var set = service.Capture(NewSetName.Trim(), activeProfile, players, NewSetNotes.Trim());
-            _shell.Report($"Captured '{set.Name}' — {set.BuildText}, {set.Files.Count} files, {set.SlotsText()}.");
+            RememberLive(set.Name);
+            _shell.Report($"Captured '{set.Name}' — {set.BuildText}, {set.Files.Count} files, {set.SlotsText()}, {set.CarriedFileCount} carried.");
             NewSetName = string.Empty;
             NewSetPlayers = string.Empty;
             NewSetNotes = string.Empty;
@@ -547,6 +952,7 @@ public sealed class SavesViewModel : ObservableObject
             var players = NewSetPlayers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var set = service.CreateEmpty(name, build, activeProfile, players, NewSetNotes.Trim());
             var backup = service.Activate(set, build, CloudAcknowledged);
+            RememberLive(set.Name);
 
             _shell.Report($"'{set.Name}' is empty and live saves are cleared - launch Isaac, then capture. " +
                           $"Previous saves backed up to {Path.GetFileName(backup)}.");
@@ -575,7 +981,9 @@ public sealed class SavesViewModel : ObservableObject
         Run(() =>
         {
             var filled = service.CaptureInto(set);
-            _shell.Report($"Captured into '{filled.Name}' - {filled.Files.Count} files, {filled.SlotsText()}.");
+            RememberLive(filled.Name);
+            _shell.Report($"Captured into '{filled.Name}' - {filled.Files.Count} files, {filled.SlotsText()}, " +
+                          $"{filled.CarriedFileCount} carried, revision {Core.Services.VectorClock.Revision(filled.Clock)}.");
         });
     }
 
@@ -631,8 +1039,15 @@ public sealed class SavesViewModel : ObservableObject
 
         Run(() =>
         {
-            var backup = service.Activate(Selected.Set, SelectedBuild, CloudAcknowledged);
-            _shell.Report($"Loaded '{Selected.Name}'. Previous saves backed up to {Path.GetFileName(backup)}.");
+            var result = service.ActivateSet(Selected.Set, SelectedBuild, CloudAcknowledged);
+            RememberLive(Selected.Name);
+
+            var carried = new List<string>();
+            if (result.ModData is { Skipped: false } m) carried.Add($"mod data for {m.Restored} file(s)");
+            if (result.RepentogonState is { Skipped: false } r && r.Restored > 0) carried.Add("REPENTOGON state");
+            var carriedText = carried.Count > 0 ? $" Restored {string.Join(" and ", carried)}." : string.Empty;
+
+            _shell.Report($"Loaded '{Selected.Name}'. Previous saves backed up to {Path.GetFileName(result.Backup)}.{carriedText}");
         });
     }
 
@@ -662,6 +1077,7 @@ public sealed class SavesViewModel : ObservableObject
         Run(() =>
         {
             var safety = service.RestoreBackup(SelectedBackup);
+            RememberLive(null);
             _shell.Report($"Restored '{SelectedBackup}'. Previous state kept at {Path.GetFileName(safety)}.");
         });
     }
