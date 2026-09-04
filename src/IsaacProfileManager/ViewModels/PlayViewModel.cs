@@ -180,9 +180,28 @@ public sealed class PlayViewModel : ObservableObject
     // capture, which is the whole "seamless" part.
 
     private string _syncText = string.Empty;
+    private string _syncResultText = string.Empty;
     private SetSyncStatus? _syncStatus;
     private bool _syncBusy;
     private int _syncGeneration;
+
+    /// <summary>What the last pull or push did, in words, on the screen it was pressed on.</summary>
+    public string SyncResultText
+    {
+        get => _syncResultText;
+        private set
+        {
+            if (SetField(ref _syncResultText, value)) OnPropertyChanged(nameof(HasSyncResult));
+        }
+    }
+
+    public bool HasSyncResult => SyncResultText.Length > 0;
+
+    private void RecordSync(string message)
+    {
+        SyncResultText = $"{DateTime.Now:HH:mm:ss}  {message}";
+        _shell.Report(message);
+    }
 
     public bool HasSync => _shell.SaveSyncEnabled;
 
@@ -247,9 +266,24 @@ public sealed class PlayViewModel : ObservableObject
             var statuses = await Task.Run(() => service.StatusAsync());
             if (generation != _syncGeneration) return;   // a newer refresh superseded this one
 
+            // A set that exists only on the other machine is created here
+            // without asking: bringing it in changes nothing live, and a fresh
+            // machine should simply have every synced set.
+            var arrivals = statuses.Where(s => s.Relation == SyncRelation.RemoteOnly && s.Newest is not null).ToList();
+            if (arrivals.Count > 0 && !SyncBusy)
+            {
+                foreach (var arrival in arrivals)
+                {
+                    if (_shell.IsIsaacRunning) break;
+                    await PullAsync(arrival, silent: true);
+                }
+                if (generation != _syncGeneration) return;
+                statuses = await Task.Run(() => service.StatusAsync());
+                if (generation != _syncGeneration) return;
+            }
+
             // The live set's row when it needs anything; otherwise whichever set
-            // does — on a fresh machine that is the set that only exists on the
-            // other one, which is exactly the row a person needs to see.
+            // does, which is the row a person needs to see.
             var mine = name is null ? null : statuses.FirstOrDefault(s => string.Equals(s.SetName, name, StringComparison.OrdinalIgnoreCase));
             var attention = statuses.FirstOrDefault(s => s.CanPull) ?? statuses.FirstOrDefault(s => s.NeedsPush);
             var pick = mine is { CanPull: true } or { NeedsPush: true } ? mine : attention ?? mine;
@@ -274,9 +308,14 @@ public sealed class PlayViewModel : ObservableObject
 
     private Task PullAsync() => SyncStatus is null ? Task.CompletedTask : PullAsync(SyncStatus, silent: false);
 
+    /// <summary>The Saves screen's pull goes through the same path, so it loads the live set the same way.</summary>
+    public Task PullAndLoadAsync(SetSyncStatus status) => PullAsync(status, silent: false);
+
     /// <summary>
-    /// Take the newer revision, then — if that set is the one live — load it
-    /// through the usual gates so the live folder matches before Launch.
+    /// Take the newer revision, then — if that set is the one live, or nothing
+    /// is live — load it through the usual gates so the live folder matches
+    /// before Launch. Every outcome is written to <see cref="SyncResultText"/>,
+    /// including a refusal to load and why.
     /// </summary>
     private async Task PullAsync(SetSyncStatus status, bool silent)
     {
@@ -306,7 +345,8 @@ public sealed class PlayViewModel : ObservableObject
                 ? service.PullAsCopyAsync(status.SetName, status.Newest)
                 : service.PullAsync(status.SetName, status.Newest));
 
-            var message = $"Pulled '{pulled.Name}' (rev {VectorClock.Revision(pulled.Clock)}) from {status.Newest.DeviceName}.";
+            var message = $"Pulled '{pulled.Name}' rev {VectorClock.Revision(pulled.Clock)} from {status.Newest.DeviceName} " +
+                          $"({pulled.Files.Count} files, slots {string.Join(",", pulled.Slots)}).";
 
             // Load it when it is the live set, or when nothing is live at all —
             // a fresh machine with an empty save folder has nothing to lose.
@@ -318,22 +358,26 @@ public sealed class PlayViewModel : ObservableObject
                 var checks = sets.Check(pulled, build, _shell.Saves.CloudAcknowledged);
                 if (checks.CanActivate)
                 {
-                    sets.ActivateSet(pulled, build, _shell.Saves.CloudAcknowledged);
+                    var result = sets.ActivateSet(pulled, build, _shell.Saves.CloudAcknowledged);
                     config.ActiveSaveSet = pulled.Name;
                     _shell.SaveConfig();
-                    message += " Loaded it as the live saves.";
+                    message += $" Loaded it as the live saves; the previous ones are in {Path.GetFileName(result.Backup)}.";
                 }
                 else
                 {
-                    message += " Not loaded: " + string.Join(" ", checks.Blockers);
+                    message += " NOT loaded — " + string.Join(" ", checks.Blockers) + " Load it from the Saves screen once that is fixed.";
                 }
             }
+            else if (!asCopy)
+            {
+                message += $" Not loaded: '{Identity?.Set?.Name ?? "another save"}' is live. Use Play a save set to switch.";
+            }
 
-            _shell.Report(message);
+            RecordSync(message);
         }
         catch (Exception ex) when (ex is SaveSyncException or UnsafePathException or ConfigSchemaMismatchException or IOException)
         {
-            _shell.Report(ex.Message);
+            RecordSync("Pull failed: " + ex.Message);
             if (!silent) MessageBox.Show(ex.Message, "Pull from sync", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -356,22 +400,25 @@ public sealed class PlayViewModel : ObservableObject
         await PushAsync(name, silent: false);
     }
 
-    private async Task PushAsync(string setName, bool silent)
+    /// <summary>Send a set's current revision to the lane store. The Saves screen uses this too.</summary>
+    public async Task<bool> PushAsync(string setName, bool silent)
     {
         SaveSyncService? service;
         try { service = _shell.CreateSaveSyncService(); }
-        catch (SaveSyncException ex) { _shell.Report(ex.Message); return; }
-        if (service is null || SyncBusy) return;
+        catch (SaveSyncException ex) { RecordSync("Push failed: " + ex.Message); return false; }
+        if (service is null || SyncBusy) return false;
 
         SyncBusy = true;
+        var pushed = false;
         try
         {
             var manifest = await Task.Run(() => service.PushAsync(setName));
-            _shell.Report($"Pushed '{setName}' revision {manifest.Revision} to {service.Store.Description}.");
+            RecordSync($"Pushed '{setName}' rev {manifest.Revision} ({manifest.PackBytes / 1024} KB) to {service.Store.Description}.");
+            pushed = true;
         }
         catch (Exception ex) when (ex is SaveSyncException or UnsafePathException or IOException)
         {
-            _shell.Report(ex.Message);
+            RecordSync("Push failed: " + ex.Message);
             if (!silent) MessageBox.Show(ex.Message, "Push to sync", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
@@ -380,6 +427,7 @@ public sealed class PlayViewModel : ObservableObject
         }
 
         _ = RefreshSyncAsync();
+        return pushed;
     }
 
     /// <summary>After exit capture: send the revision on, so the other machine can pick it up.</summary>

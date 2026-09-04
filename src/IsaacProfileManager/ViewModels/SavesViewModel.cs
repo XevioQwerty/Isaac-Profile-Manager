@@ -565,51 +565,24 @@ public sealed class SavesViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedSync));
     }
 
+    /// <summary>What the last pull or push did, shown on the card rather than only in the status bar.</summary>
+    public string SyncLastAction => _shell.Play.SyncResultText;
+
     private async Task PushSelectedAsync()
     {
         var name = Selected?.Name;
         if (name is null) return;
-        try
-        {
-            var service = _shell.CreateSaveSyncService();
-            if (service is null) return;
-            var manifest = await Task.Run(() => service.PushAsync(name));
-            _shell.Report($"Pushed '{name}' revision {manifest.Revision} to {service.Store.Description}.");
-        }
-        catch (Exception ex) when (ex is SaveSyncException or UnsafePathException or IOException)
-        {
-            _shell.Report(ex.Message);
-            MessageBox.Show(ex.Message, "Push", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
+        await _shell.Play.PushAsync(name, silent: false);
+        OnPropertyChanged(nameof(SyncLastAction));
         await CheckSyncAsync();
     }
 
+    /// <summary>Same path as the Play screen: pull, and load it if it is the live set or nothing is live.</summary>
     private async Task PullStatusAsync(SetSyncStatus? status)
     {
         if (status?.Newest is null) return;
-        var asCopy = status.Relation == SyncRelation.Fork;
-
-        var question = asCopy
-            ? $"'{status.SetName}' was played here and on {status.Newest.DeviceName} from the same point. Bring the {status.Newest.DeviceName} revision in as a separate set so you can compare?"
-            : $"Pull '{status.SetName}' revision {status.RemoteRevision} from {status.Newest.DeviceName}? What is here is filed into history first. The live saves are not touched — load the set afterwards.";
-        if (MessageBox.Show(question, "Pull", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-
-        try
-        {
-            var service = _shell.CreateSaveSyncService();
-            if (service is null) return;
-            var pulled = await Task.Run(() => asCopy ? service.PullAsCopyAsync(status.SetName, status.Newest) : service.PullAsync(status.SetName, status.Newest));
-            _shell.Report($"Pulled '{pulled.Name}' (rev {VectorClock.Revision(pulled.Clock)}) from {status.Newest.DeviceName}.");
-        }
-        catch (Exception ex) when (ex is SaveSyncException or UnsafePathException or ConfigSchemaMismatchException or IOException)
-        {
-            _shell.Report(ex.Message);
-            MessageBox.Show(ex.Message, "Pull", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-
-        var keep = _shell.StatusMessage;
-        _shell.Reload();
-        _shell.Report(keep);
+        await _shell.Play.PullAndLoadAsync(status);
+        OnPropertyChanged(nameof(SyncLastAction));
     }
 
     // --- Files in and out -------------------------------------------------------
@@ -867,7 +840,13 @@ public sealed class SavesViewModel : ObservableObject
             OnPropertyChanged(nameof(HasLiveSlots));
         }
 
-        Selected = Sets.FirstOrDefault(s => s.Name == previous) ?? Sets.FirstOrDefault();
+        // Keep what was selected; otherwise open on the set that is live, which
+        // is the one a person came here about — not the first name alphabetically.
+        var live = _shell.Config?.ActiveSaveSet;
+        Selected = Sets.FirstOrDefault(s => s.Name == previous)
+                   ?? Sets.FirstOrDefault(s => string.Equals(s.Name, live, StringComparison.OrdinalIgnoreCase))
+                   ?? Sets.FirstOrDefault();
+        OnPropertyChanged(nameof(SyncLastAction));
         SelectedBackup = Backups.Contains(previousBackup ?? "") ? previousBackup : Backups.FirstOrDefault();
 
         RaiseGate();

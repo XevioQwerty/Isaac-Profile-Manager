@@ -103,8 +103,10 @@
                             <Button Content="Pull selected" Command="{Binding PullSelectedCommand}" Margin="0,0,8,8"
                                     ToolTip="Take the newer revision from the other machine. A fork comes in as a separate set."/>
                         </WrapPanel>
+                        <TextBlock Text="{Binding SyncLastAction}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Visibility="{Binding SyncLastAction, Converter={StaticResource StringToVisible}}"/>
                         <TextBlock Style="{StaticResource Dim}" TextWrapping="Wrap"
-                                   Text="Set up under Settings. The Play screen does the same for the set that is live, and does it by itself in Automatic mode."/>
+                                   Text="A set that is only on the other machine is created here on its own. Pull loads a set that is live, or when nothing is live. Push sends after the game closes when Automatic is on under Settings, or asks otherwise."/>
                     </StackPanel>
                 </Border>
 
