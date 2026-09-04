@@ -527,7 +527,15 @@ public sealed class SavesViewModel : ObservableObject
 
     public RelayCommand CheckSyncCommand => new(() => _ = CheckSyncAsync(), () => HasSync);
     public RelayCommand PushSelectedCommand => new(() => _ = PushSelectedAsync(), () => HasSync && Selected is { IsEmpty: false });
-    public RelayCommand PullSelectedCommand => new(() => _ = PullSelectedAsync(), () => HasSync && SelectedSync?.CanPull == true && !_shell.IsIsaacRunning);
+    public RelayCommand PullSelectedCommand => new(() => _ = PullStatusAsync(SelectedSync), () => HasSync && SelectedSync?.CanPull == true && !_shell.IsIsaacRunning);
+
+    /// <summary>
+    /// Pull one row of the list. A set that exists only on the other machine
+    /// has nothing to select here, so the button sits on its row.
+    /// </summary>
+    public RelayCommand PullStatusCommand => new(
+        p => _ = PullStatusAsync(p as SetSyncStatus),
+        p => p is SetSyncStatus { CanPull: true } && !_shell.IsIsaacRunning);
 
     private async Task CheckSyncAsync()
     {
@@ -576,9 +584,8 @@ public sealed class SavesViewModel : ObservableObject
         await CheckSyncAsync();
     }
 
-    private async Task PullSelectedAsync()
+    private async Task PullStatusAsync(SetSyncStatus? status)
     {
-        var status = SelectedSync;
         if (status?.Newest is null) return;
         var asCopy = status.Relation == SyncRelation.Fork;
 

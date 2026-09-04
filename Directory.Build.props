@@ -12,7 +12,7 @@
     executables all follow it. Bump here and nowhere else.
   -->
   <PropertyGroup>
-    <Version>2.5.0</Version>
+    <Version>2.5.1</Version>
     <Product>Isaac Profile Manager</Product>
     <Company>XevioQwerty</Company>
   </PropertyGroup>

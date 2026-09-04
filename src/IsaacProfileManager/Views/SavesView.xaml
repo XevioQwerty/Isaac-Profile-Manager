@@ -78,10 +78,21 @@
                         <ItemsControl ItemsSource="{Binding SyncStatuses}" Margin="0,0,0,8">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <StackPanel Margin="0,0,0,4">
-                                        <TextBlock Text="{Binding SetName}" FontWeight="SemiBold"/>
-                                        <TextBlock Text="{Binding Text}" Style="{StaticResource Dim}" TextWrapping="Wrap"/>
-                                    </StackPanel>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="{Binding SetName}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Text}" Style="{StaticResource Dim}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Pull" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                Command="{Binding DataContext.PullStatusCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"
+                                                Visibility="{Binding CanPull, Converter={StaticResource BoolToVisible}}"
+                                                ToolTip="Take this revision. A set that is not here yet is created; a fork comes in as a separate set."/>
+                                    </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

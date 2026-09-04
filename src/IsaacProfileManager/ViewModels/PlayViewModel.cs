@@ -235,7 +235,6 @@ public sealed class PlayViewModel : ObservableObject
         OnPropertyChanged(nameof(HasSync));
 
         var name = SyncTargetSet;
-        if (name is null) { SyncText = "no save set to sync yet"; return; }
 
         SaveSyncService? service;
         try { service = _shell.CreateSaveSyncService(); }
@@ -245,14 +244,23 @@ public sealed class PlayViewModel : ObservableObject
         SyncText = $"checking {service.Store.Description}…";
         try
         {
-            var status = await Task.Run(() => service.StatusOfAsync(name));
+            var statuses = await Task.Run(() => service.StatusAsync());
             if (generation != _syncGeneration) return;   // a newer refresh superseded this one
 
-            SyncStatus = status;
-            SyncText = status is null ? $"'{name}' is not on {service.Store.Description}" : $"'{name}': {status.Text}";
+            // The live set's row when it needs anything; otherwise whichever set
+            // does — on a fresh machine that is the set that only exists on the
+            // other one, which is exactly the row a person needs to see.
+            var mine = name is null ? null : statuses.FirstOrDefault(s => string.Equals(s.SetName, name, StringComparison.OrdinalIgnoreCase));
+            var attention = statuses.FirstOrDefault(s => s.CanPull) ?? statuses.FirstOrDefault(s => s.NeedsPush);
+            var pick = mine is { CanPull: true } or { NeedsPush: true } ? mine : attention ?? mine;
 
-            if (status is { CanPull: true, Relation: not SyncRelation.Fork } && _shell.SaveSyncAutomatic && !_shell.IsIsaacRunning)
-                await PullAsync(status, silent: true);
+            SyncStatus = pick;
+            SyncText = pick is not null ? $"'{pick.SetName}': {pick.Text}"
+                     : name is null ? $"nothing on {service.Store.Description} yet"
+                     : $"'{name}' is not on {service.Store.Description}";
+
+            if (pick is { CanPull: true, Relation: not SyncRelation.Fork } && _shell.SaveSyncAutomatic && !_shell.IsIsaacRunning)
+                await PullAsync(pick, silent: true);
         }
         catch (SaveSyncException ex)
         {
@@ -287,7 +295,7 @@ public sealed class PlayViewModel : ObservableObject
         if (!silent && !asCopy && MessageBox.Show(
                 $"Pull '{status.SetName}' revision {status.RemoteRevision} from {status.Newest.DeviceName}?\n\n" +
                 "What this machine has is filed into the set's history first." +
-                (IsLive(status.SetName) ? " The live saves are then loaded from it, with every check." : ""),
+                (IsLive(status.SetName) || Identity?.State is LiveSaveState.NoSaves ? " The live saves are then loaded from it, with every check." : ""),
                 "Pull from sync", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
 
@@ -300,7 +308,10 @@ public sealed class PlayViewModel : ObservableObject
 
             var message = $"Pulled '{pulled.Name}' (rev {VectorClock.Revision(pulled.Clock)}) from {status.Newest.DeviceName}.";
 
-            if (!asCopy && IsLive(status.SetName))
+            // Load it when it is the live set, or when nothing is live at all —
+            // a fresh machine with an empty save folder has nothing to lose.
+            var nothingLive = Identity?.State is LiveSaveState.NoSaves;
+            if (!asCopy && (IsLive(status.SetName) || nothingLive))
             {
                 var sets = _shell.CreateSaveSetService()!;
                 var build = pulled.Build == GameBuild.Both ? GameBuild.Unknown : pulled.Build;

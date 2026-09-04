@@ -576,7 +576,7 @@ public sealed class ModProfileService : IModProfileService
         if (!Directory.Exists(profileDir)) return 0;
 
         var cleared = 0;
-        foreach (var marker in Directory.EnumerateFiles(profileDir, DisableMarker, SearchOption.AllDirectories))
+        foreach (var marker in MarkersUnder(new DirectoryInfo(profileDir)))
         {
             try
             {
@@ -590,5 +590,37 @@ public sealed class ModProfileService : IModProfileService
             }
         }
         return cleared;
+    }
+
+    /// <summary>
+    /// Every disable.it under a folder, walking real folders only.
+    ///
+    /// A library-built profile is junctions, and this used to recurse with
+    /// SearchOption.AllDirectories. Two things wrong with that: a marker found
+    /// through a junction is in the shared library, and deleting it changes
+    /// every profile that links the same mod; and .NET refuses to recurse into
+    /// a junction it deems untrusted, which on a fresh laptop with the profiles
+    /// under Documents was "The path cannot be traversed because it contains an
+    /// untrusted mount point" the first time Activate was pressed.
+    /// </summary>
+    private static IEnumerable<string> MarkersUnder(DirectoryInfo folder)
+    {
+        FileInfo[] files;
+        DirectoryInfo[] subfolders;
+        try
+        {
+            files = folder.GetFiles(DisableMarker);
+            subfolders = folder.GetDirectories();
+        }
+        catch (IOException) { yield break; }
+        catch (UnauthorizedAccessException) { yield break; }
+
+        foreach (var file in files) yield return file.FullName;
+
+        foreach (var sub in subfolders)
+        {
+            if ((sub.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+            foreach (var marker in MarkersUnder(sub)) yield return marker;
+        }
     }
 }
